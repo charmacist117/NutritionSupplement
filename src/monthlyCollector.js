@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
-import { fetchKeywordTrends, fetchPopularKeywords, NaverShoppingInsightError } from "./naverShoppingInsight.js";
+import { assertNaverCredentials, fetchKeywordTrends, fetchPopularKeywords, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { fetchPopularKeywordsWithBrowser } from "./naverPopularKeywordBrowser.js";
 import { saveMonthlyReport } from "./storage.js";
 
@@ -18,6 +18,8 @@ export function previousMonthRange(now = new Date()) {
 }
 
 export async function collectMonthlyNutritionKeywords(options = {}) {
+  assertNaverCredentials();
+
   const range = options.range || previousMonthRange();
   const category = options.category || HEALTH_FOOD_CATEGORY.id;
   const popularKeywords = options.popularKeywords || await loadPopularKeywords(options.popularKeywordFile, {

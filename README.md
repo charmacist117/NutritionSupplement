@@ -39,4 +39,5 @@ Vercel에는 Blob 저장소를 연결해야 월별 리포트가 배포 환경에
 
 - `GET /api/monthly-reports`: 저장된 월 목록
 - `GET /api/monthly-report?month=YYYY-MM`: 특정 월 리포트
+- `GET /api/health`: 배포 설정 상태
 - `POST /api/collect-monthly`: 직전월 리포트 수집 및 저장

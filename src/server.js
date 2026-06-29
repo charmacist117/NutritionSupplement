@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentials, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { getMonthlyReport, listMonthlyReports } from "./storage.js";
+import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -20,7 +22,9 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/health") {
       return sendJson(response, 200, {
         ok: true,
-        naverConfigured: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET)
+        naverConfigured: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET),
+        blobConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+        category: HEALTH_FOOD_CATEGORY
       });
     }
 
@@ -113,7 +117,10 @@ function handleError(response, error) {
   }
 
   console.error(error);
-  sendJson(response, 500, { error: "Internal server error" });
+  sendJson(response, 500, {
+    error: error.message || "Internal server error",
+    details: error.stack ? error.stack.split("\n").slice(0, 3).join("\n") : null
+  });
 }
 
 function sendJson(response, status, payload) {
@@ -135,19 +142,18 @@ function contentType(filePath) {
 function loadLocalEnv() {
   const envPath = join(rootDir, ".env");
 
-  readFile(envPath, "utf8")
-    .then((content) => {
-      for (const line of content.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
+  if (!existsSync(envPath)) return;
 
-        const index = trimmed.indexOf("=");
-        if (index === -1) continue;
+  const content = readFileSync(envPath, "utf8");
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
 
-        const key = trimmed.slice(0, index).trim();
-        const value = trimmed.slice(index + 1).trim();
-        if (key && process.env[key] === undefined) process.env[key] = value;
-      }
-    })
-    .catch(() => {});
+    const index = trimmed.indexOf("=");
+    if (index === -1) continue;
+
+    const key = trimmed.slice(0, index).trim();
+    const value = trimmed.slice(index + 1).trim();
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
 }

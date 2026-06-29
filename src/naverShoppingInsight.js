@@ -19,6 +19,15 @@ export function getNaverCredentials(env = process.env) {
   };
 }
 
+export function assertNaverCredentials(credentials = getNaverCredentials()) {
+  if (!credentials.clientId || !credentials.clientSecret) {
+    throw new NaverShoppingInsightError(
+      "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 환경변수가 필요합니다.",
+      500
+    );
+  }
+}
+
 export function buildKeywordPayload(input) {
   const startDate = requireDate(input.startDate, "startDate");
   const endDate = requireDate(input.endDate, "endDate");
@@ -52,9 +61,7 @@ export function buildKeywordPayload(input) {
 }
 
 export async function fetchKeywordTrends(input, credentials = getNaverCredentials()) {
-  if (!credentials.clientId || !credentials.clientSecret) {
-    throw new NaverShoppingInsightError("Naver API credentials are missing.", 500);
-  }
+  assertNaverCredentials(credentials);
 
   const payload = buildKeywordPayload(input);
   const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {

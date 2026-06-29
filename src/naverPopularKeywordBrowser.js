@@ -1,6 +1,4 @@
 const DATALAB_URL = "https://datalab.naver.com/shoppingInsight/sCategory.naver";
-const RANK_URL = "https://datalab.naver.com/shoppingInsight/getCategoryKeywordRank.naver";
-
 export async function fetchPopularKeywordsWithBrowser(input) {
   const browser = await launchBrowser();
 
@@ -30,13 +28,22 @@ export async function fetchPopularKeywordsWithBrowser(input) {
           body
         });
         const text = await response.text();
-        return JSON.parse(text).ranks || [];
+
+        try {
+          return JSON.parse(text).ranks || [];
+        } catch {
+          throw new Error(`Top 500 ranking response was not JSON. ${text.slice(0, 200)}`);
+        }
       }, {
         category: input.category,
         startDate: input.startDate,
         endDate: input.endDate,
         pageNo
       });
+
+      if (!ranks.length) {
+        throw new Error(`No popular keywords returned from Naver DataLab page ${pageNo}.`);
+      }
 
       rows.push(...ranks.map((item, index) => ({
         rank: (pageNo - 1) * 20 + index + 1,

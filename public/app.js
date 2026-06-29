@@ -15,11 +15,18 @@ collectButton.addEventListener("click", async () => {
   try {
     const response = await fetch("/api/collect-monthly", { method: "POST" });
     const report = await response.json();
-    if (!response.ok) throw new Error(report.error || "수집에 실패했습니다.");
+
+    if (!response.ok) {
+      const details = report.details ? ` (${String(report.details).slice(0, 160)})` : "";
+      throw new Error(`${report.error || "수집에 실패했습니다."}${details}`);
+    }
 
     statusText.textContent = `${report.month} 수집이 완료되었습니다.`;
     await loadMonths(report.month);
     renderReport(report);
+    if (!monthList.querySelector(".month-button")) {
+      statusText.textContent = `${report.month} 수집이 완료되었습니다. Blob 저장소가 없으면 새로고침 후에는 사라질 수 있습니다.`;
+    }
   } catch (error) {
     statusText.textContent = error.message;
   } finally {
@@ -27,7 +34,32 @@ collectButton.addEventListener("click", async () => {
   }
 });
 
+await loadHealth();
 await loadMonths();
+
+async function loadHealth() {
+  try {
+    const response = await fetch("/api/health");
+    if (!response.ok) return;
+
+    const health = await response.json();
+
+    if (!health.naverConfigured) {
+      statusText.textContent = "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 환경변수가 필요합니다.";
+      collectButton.disabled = true;
+      return;
+    }
+
+    if (!health.blobConfigured) {
+      statusText.textContent = "Vercel Blob이 연결되지 않았습니다. 배포 환경에서는 월별 자료 저장이 되지 않을 수 있습니다.";
+      return;
+    }
+
+    statusText.textContent = "수집 준비가 완료되었습니다.";
+  } catch {
+    statusText.textContent = "설정 상태를 확인하지 못했습니다.";
+  }
+}
 
 async function loadMonths(preferredMonth = null) {
   const response = await fetch("/api/monthly-reports");
@@ -37,7 +69,9 @@ async function loadMonths(preferredMonth = null) {
 
   if (!months.length) {
     monthList.innerHTML = `<p class="empty">아직 저장된 월별 자료가 없습니다.</p>`;
-    statusText.textContent = "직전월 수집을 실행하면 자료가 생성됩니다.";
+    if (!collectButton.disabled) {
+      statusText.textContent = "직전월 수집을 실행하면 자료가 생성됩니다.";
+    }
     return;
   }
 

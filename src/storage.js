@@ -17,6 +17,10 @@ export async function saveMonthlyReport(result, options = {}) {
     return;
   }
 
+  if (process.env.VERCEL) {
+    return;
+  }
+
   const outputDir = options.outputDir || join(process.cwd(), "data", "monthly");
   await mkdir(outputDir, { recursive: true });
   await writeFile(join(outputDir, `${result.month}.json`), `${JSON.stringify(result, null, 2)}\n`, "utf8");
@@ -72,7 +76,7 @@ export async function listMonthlyReports(options = {}) {
 }
 
 function shouldUseBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
 function toCsv(rows) {
