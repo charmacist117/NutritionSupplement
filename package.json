@@ -1,0 +1,11 @@
+{
+  "name": "nutrition-supplement",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "collect:monthly": "node scripts/collectMonthly.js",
+    "check": "node --check src/server.js && node --check src/naverShoppingInsight.js && node --check src/monthlyCollector.js && node --check api/collect-monthly.js && node --check api/shopping-keywords.js"
+  }
+}

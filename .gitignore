@@ -1,0 +1,6 @@
+.env
+node_modules/
+data/monthly/
+*.log
+.DS_Store
+Thumbs.db
