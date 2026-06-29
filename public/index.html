@@ -8,64 +8,50 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="query-panel">
+      <section class="summary-band">
         <div>
           <p class="eyebrow">Naver Shopping Insight</p>
-          <h1>NutritionSupplement</h1>
+          <h1>건강식품 월별 검색어 리포트</h1>
+          <p id="status">월별 데이터를 불러오는 중</p>
         </div>
-
-        <form id="trend-form" class="form-grid">
-          <label>
-            시작일
-            <input name="startDate" type="date" required>
-          </label>
-          <label>
-            종료일
-            <input name="endDate" type="date" required>
-          </label>
-          <label>
-            단위
-            <select name="timeUnit">
-              <option value="week">주간</option>
-              <option value="date">일간</option>
-              <option value="month">월간</option>
-            </select>
-          </label>
-          <label>
-            쇼핑 카테고리 코드
-            <input name="category" placeholder="예: 50000023" required>
-          </label>
-          <label class="wide">
-            키워드
-            <input name="keywords" placeholder="마그네슘, 오메가3, 루테인" required>
-          </label>
-          <label>
-            기기
-            <select name="device">
-              <option value="">전체</option>
-              <option value="pc">PC</option>
-              <option value="mo">모바일</option>
-            </select>
-          </label>
-          <label>
-            성별
-            <select name="gender">
-              <option value="">전체</option>
-              <option value="m">남성</option>
-              <option value="f">여성</option>
-            </select>
-          </label>
-          <button type="submit">조회</button>
-        </form>
+        <button id="collect-button" type="button">직전월 수집</button>
       </section>
 
-      <section class="result-panel">
-        <div class="panel-header">
-          <h2>결과</h2>
-          <span id="status">대기 중</span>
-        </div>
-        <div id="chart" class="chart"></div>
-        <pre id="raw-output"></pre>
+      <section class="workspace">
+        <aside class="month-panel">
+          <h2>월별 자료</h2>
+          <div id="month-list" class="month-list"></div>
+        </aside>
+
+        <section class="report-panel">
+          <div class="report-header">
+            <div>
+              <h2 id="report-title">리포트 선택</h2>
+              <p id="report-meta">월을 선택하면 Top 500 검색어와 평균 클릭량 점수가 표시됩니다.</p>
+            </div>
+            <div class="metric">
+              <span>기준 키워드</span>
+              <strong id="anchor-keyword">-</strong>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>순위</th>
+                  <th>검색어</th>
+                  <th>일일 점수 평균</th>
+                </tr>
+              </thead>
+              <tbody id="report-body">
+                <tr>
+                  <td colspan="3">저장된 월별 리포트가 없습니다.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
 

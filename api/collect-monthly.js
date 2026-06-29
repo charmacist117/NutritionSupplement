@@ -10,7 +10,9 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: "Method not allowed" });
   }
 
-  if (process.env.CRON_SECRET && request.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+  const isVercelCron = String(request.headers["user-agent"] || "").includes("vercel-cron");
+  const isAuthorized = request.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
+  if (process.env.CRON_SECRET && !isVercelCron && !isAuthorized) {
     return response.status(401).json({ error: "Unauthorized" });
   }
 

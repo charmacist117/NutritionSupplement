@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "@sparticuz/chromium": "latest",
+    "@vercel/blob": "latest",
+    "puppeteer-core": "latest"
+  },
   "scripts": {
     "start": "node src/server.js",
     "collect:monthly": "node scripts/collectMonthly.js",

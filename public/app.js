@@ -1,88 +1,112 @@
-const form = document.querySelector("#trend-form");
 const statusText = document.querySelector("#status");
-const rawOutput = document.querySelector("#raw-output");
-const chart = document.querySelector("#chart");
+const monthList = document.querySelector("#month-list");
+const reportTitle = document.querySelector("#report-title");
+const reportMeta = document.querySelector("#report-meta");
+const reportBody = document.querySelector("#report-body");
+const anchorKeyword = document.querySelector("#anchor-keyword");
+const collectButton = document.querySelector("#collect-button");
 
-const today = new Date();
-const endDate = today.toISOString().slice(0, 10);
-const start = new Date(today);
-start.setMonth(start.getMonth() - 3);
+let selectedMonth = null;
 
-form.elements.startDate.value = start.toISOString().slice(0, 10);
-form.elements.endDate.value = endDate;
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  statusText.textContent = "조회 중";
-  chart.replaceChildren();
-  rawOutput.textContent = "";
-
-  const data = new FormData(form);
-  const payload = {
-    startDate: data.get("startDate"),
-    endDate: data.get("endDate"),
-    timeUnit: data.get("timeUnit"),
-    category: data.get("category"),
-    keywords: String(data.get("keywords") || "")
-      .split(",")
-      .map((keyword) => keyword.trim())
-      .filter(Boolean),
-    device: data.get("device"),
-    gender: data.get("gender")
-  };
+collectButton.addEventListener("click", async () => {
+  collectButton.disabled = true;
+  statusText.textContent = "직전월 데이터를 수집하는 중입니다.";
 
   try {
-    const response = await fetch("/api/shopping-keywords", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const result = await response.json();
+    const response = await fetch("/api/collect-monthly", { method: "POST" });
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error || "수집에 실패했습니다.");
 
-    if (!response.ok) {
-      throw new Error(result.error || "조회에 실패했습니다.");
-    }
-
-    statusText.textContent = "완료";
-    rawOutput.textContent = JSON.stringify(result, null, 2);
-    renderChart(result.results || []);
+    statusText.textContent = `${report.month} 수집이 완료되었습니다.`;
+    await loadMonths(report.month);
+    renderReport(report);
   } catch (error) {
-    statusText.textContent = "오류";
-    rawOutput.textContent = error.message;
+    statusText.textContent = error.message;
+  } finally {
+    collectButton.disabled = false;
   }
 });
 
-function renderChart(results) {
-  if (!results.length) {
-    chart.textContent = "표시할 데이터가 없습니다.";
+await loadMonths();
+
+async function loadMonths(preferredMonth = null) {
+  const response = await fetch("/api/monthly-reports");
+  const { months = [] } = response.ok ? await response.json() : { months: [] };
+
+  monthList.replaceChildren();
+
+  if (!months.length) {
+    monthList.innerHTML = `<p class="empty">아직 저장된 월별 자료가 없습니다.</p>`;
+    statusText.textContent = "직전월 수집을 실행하면 자료가 생성됩니다.";
     return;
   }
 
-  const max = Math.max(
-    1,
-    ...results.flatMap((series) => (series.data || []).map((point) => Number(point.ratio) || 0))
-  );
-
-  for (const series of results) {
-    const group = document.createElement("article");
-    group.className = "series";
-
-    const title = document.createElement("h3");
-    title.textContent = series.title || "키워드";
-    group.append(title);
-
-    const bars = document.createElement("div");
-    bars.className = "bars";
-
-    for (const point of series.data || []) {
-      const bar = document.createElement("div");
-      bar.className = "bar";
-      bar.style.height = `${Math.max(3, (Number(point.ratio) / max) * 100)}%`;
-      bar.title = `${point.period}: ${point.ratio}`;
-      bars.append(bar);
-    }
-
-    group.append(bars);
-    chart.append(group);
+  for (const month of months) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = month;
+    button.className = "month-button";
+    button.addEventListener("click", () => loadReport(month));
+    monthList.append(button);
   }
+
+  await loadReport(preferredMonth || months[0]);
+}
+
+async function loadReport(month) {
+  selectedMonth = month;
+  statusText.textContent = `${month} 자료를 불러오는 중입니다.`;
+  updateMonthSelection();
+
+  const response = await fetch(`/api/monthly-report?month=${encodeURIComponent(month)}`);
+  const report = await response.json();
+
+  if (!response.ok) {
+    statusText.textContent = report.error || "자료를 불러오지 못했습니다.";
+    return;
+  }
+
+  renderReport(report);
+  statusText.textContent = `${month} 자료를 표시 중입니다.`;
+}
+
+function renderReport(report) {
+  selectedMonth = report.month;
+  updateMonthSelection();
+
+  reportTitle.textContent = `${report.month} 건강식품 Top ${report.count}`;
+  reportMeta.textContent = `${report.startDate} ~ ${report.endDate} / ${report.categoryPath.join(" > ")}`;
+  anchorKeyword.textContent = report.anchor?.keyword || "-";
+
+  reportBody.replaceChildren();
+
+  for (const row of report.rows || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.rank}</td>
+      <td>${escapeHtml(row.keyword)}</td>
+      <td>${formatScore(row.dailyAverageRatio)}</td>
+    `;
+    reportBody.append(tr);
+  }
+}
+
+function updateMonthSelection() {
+  for (const button of monthList.querySelectorAll(".month-button")) {
+    button.classList.toggle("active", button.textContent === selectedMonth);
+  }
+}
+
+function formatScore(value) {
+  return Number(value || 0).toFixed(3);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
 }

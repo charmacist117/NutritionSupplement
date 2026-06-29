@@ -4,6 +4,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentials, NaverShoppingInsightError } from "./naverShoppingInsight.js";
+import { getMonthlyReport, listMonthlyReports } from "./storage.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -14,21 +15,23 @@ const port = Number(process.env.PORT || 3010);
 
 const server = createServer(async (request, response) => {
   try {
-    if (request.method === "GET" && request.url === "/api/health") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+
+    if (request.method === "GET" && url.pathname === "/api/health") {
       return sendJson(response, 200, {
         ok: true,
         naverConfigured: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET)
       });
     }
 
-    if (request.method === "POST" && (request.url === "/api/shopping/keywords" || request.url === "/api/shopping-keywords")) {
+    if (request.method === "POST" && (url.pathname === "/api/shopping/keywords" || url.pathname === "/api/shopping-keywords")) {
       const body = await readJson(request);
       const result = await fetchKeywordTrends(body, getNaverCredentials());
 
       return sendJson(response, 200, result);
     }
 
-    if (request.method === "POST" && request.url === "/api/collect-monthly") {
+    if (request.method === "POST" && url.pathname === "/api/collect-monthly") {
       const body = await readJson(request);
       const result = await collectMonthlyNutritionKeywords({
         range: body.range || previousMonthRange(),
@@ -37,6 +40,18 @@ const server = createServer(async (request, response) => {
       });
 
       return sendJson(response, 200, result);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/monthly-reports") {
+      const months = await listMonthlyReports({ outputDir: join(rootDir, "data", "monthly") });
+      return sendJson(response, 200, { months });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/monthly-report") {
+      const report = await getMonthlyReport(url.searchParams.get("month") || "", {
+        outputDir: join(rootDir, "data", "monthly")
+      });
+      return report ? sendJson(response, 200, report) : sendJson(response, 404, { error: "Monthly report not found." });
     }
 
     if (request.method === "GET") {

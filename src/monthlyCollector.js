@@ -1,8 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { fetchKeywordTrends, fetchPopularKeywords, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-
-const DEFAULT_CATEGORY_ID = "50000006";
+import { fetchPopularKeywordsWithBrowser } from "./naverPopularKeywordBrowser.js";
+import { saveMonthlyReport } from "./storage.js";
 
 export function previousMonthRange(now = new Date()) {
   const year = now.getUTCFullYear();
@@ -19,7 +19,7 @@ export function previousMonthRange(now = new Date()) {
 
 export async function collectMonthlyNutritionKeywords(options = {}) {
   const range = options.range || previousMonthRange();
-  const category = options.category || process.env.NAVER_HEALTH_FOOD_CATEGORY_ID || DEFAULT_CATEGORY_ID;
+  const category = options.category || HEALTH_FOOD_CATEGORY.id;
   const popularKeywords = options.popularKeywords || await loadPopularKeywords(options.popularKeywordFile, {
     category,
     startDate: range.startDate,
@@ -46,23 +46,17 @@ export async function collectMonthlyNutritionKeywords(options = {}) {
     startDate: range.startDate,
     endDate: range.endDate,
     category,
-    categoryPath: ["식품", "건강식품"],
+    categoryPath: HEALTH_FOOD_CATEGORY.path,
     anchor,
     count: rows.length,
     rows
   };
 
-  if (options.outputDir) {
-    await saveMonthlyResult(options.outputDir, result);
+  if (options.persist !== false) {
+    await saveMonthlyReport(result, { outputDir: options.outputDir });
   }
 
   return result;
-}
-
-export async function saveMonthlyResult(outputDir, result) {
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, `${result.month}.json`), `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  await writeFile(join(outputDir, `${result.month}.csv`), toCsv(result.rows), "utf8");
 }
 
 async function loadPopularKeywords(filePath, request) {
@@ -72,7 +66,18 @@ async function loadPopularKeywords(filePath, request) {
     return keywords.map((keyword, index) => ({ rank: index + 1, keyword })).slice(0, request.limit);
   }
 
-  return fetchPopularKeywords(request);
+  if (process.env.VERCEL || process.env.NAVER_POPULAR_KEYWORD_SOURCE === "browser") {
+    return fetchPopularKeywordsWithBrowser(request);
+  }
+
+  try {
+    return await fetchPopularKeywords(request);
+  } catch (error) {
+    if (process.env.CHROME_EXECUTABLE_PATH) {
+      return fetchPopularKeywordsWithBrowser(request);
+    }
+    throw error;
+  }
 }
 
 async function chooseAnchorKeyword({ category, range, keywords }) {
@@ -151,17 +156,6 @@ function parseKeywordList(text) {
     .split(/\r?\n/)
     .map((line) => line.split(",")[0].trim())
     .filter((line) => line && line !== "keyword");
-}
-
-function toCsv(rows) {
-  const header = ["rank", "keyword", "dailyAverageRatio"];
-  const lines = rows.map((row) => [row.rank, row.keyword, row.dailyAverageRatio].map(csvCell).join(","));
-  return `${header.join(",")}\n${lines.join("\n")}\n`;
-}
-
-function csvCell(value) {
-  const text = value == null ? "" : String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function average(values) {
