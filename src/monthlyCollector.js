@@ -109,7 +109,7 @@ async function chooseAnchorKeyword({ category, range, keywords }) {
   });
 
   const candidates = (result.results || []).map((series) => {
-    const maxDailyRatio = Math.max(0, ...(series.data || []).map((point) => Number(point.ratio) || 0));
+    const maxDailyRatio = Math.max(0, ...(series.data || []).map((point) => displayScore(point.ratio)));
     return { keyword: series.title, maxDailyRatio };
   });
 
@@ -139,11 +139,9 @@ async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popu
     for (const series of result.results || []) {
       const row = byKeyword.get(series.title);
       if (!row) continue;
+      if (series.title === anchorKeyword && row.dailyAverageRatio !== null) continue;
 
-      row.points = (series.data || []).map((point) => ({
-        period: point.period,
-        ratio: Number(point.ratio) || 0
-      }));
+      row.points = dailyPoints(series.data || [], range);
       row.dailyAverageRatio = average(row.points.map((point) => point.ratio));
     }
   }
@@ -158,7 +156,7 @@ async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popu
       timeUnit: "date"
     });
     const series = anchorResult.results?.[0];
-    anchorRow.points = (series?.data || []).map((point) => ({ period: point.period, ratio: Number(point.ratio) || 0 }));
+    anchorRow.points = dailyPoints(series?.data || [], range);
     anchorRow.dailyAverageRatio = average(anchorRow.points.map((point) => point.ratio));
   }
 
@@ -215,6 +213,36 @@ function lastDayOfMonth(monthKey) {
 function average(values) {
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function dailyPoints(data, range) {
+  const byPeriod = new Map(data.map((point) => [point.period, point]));
+
+  return dateRange(range.startDate, range.endDate).map((period) => {
+    const point = byPeriod.get(period);
+    return {
+      period,
+      ratio: displayScore(point?.ratio),
+      rawRatio: Number(point?.ratio) || 0
+    };
+  });
+}
+
+function dateRange(startDate, endDate) {
+  const dates = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return dates;
+}
+
+function displayScore(value) {
+  return Math.round(Number(value) || 0);
 }
 
 function chunk(items, size) {
