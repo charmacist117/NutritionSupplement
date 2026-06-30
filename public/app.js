@@ -311,11 +311,6 @@ async function saveCurrentReport() {
 
 async function downloadReportXlsx(report) {
   const rows = report.rows || [];
-  const previousReport = await loadPreviousReport(report);
-  const previousRows = previousReport?.rows || [];
-  const previousLabel = previousReport ? periodLabel(previousReport) : "";
-  const previousRankByKeyword = new Map(previousRows.map((row) => [normalizeText(row.keyword), row.rank]));
-  const previousScoreByGroup = scoreByProductGroup(previousRows);
   const currentScoreByGroup = scoreByProductGroup(rows);
   const xlsxRows = [
     [
@@ -324,19 +319,9 @@ async function downloadReportXlsx(report) {
       "일일 점수 평균",
       "제품군 분류",
       "타깃 분류",
-      "직전 기간 순위 변동",
-      "",
-      "직전 기간 자료",
-      "",
-      "직전 기간 순위",
-      "직전 기간 검색어",
-      "직전 기간 점수",
-      "직전 기간 구분",
       "",
       "구분",
-      "선택 기간 총계",
-      "직전 기간 총계",
-      "증감"
+      "선택 기간 총계"
     ],
     ...rows.map((row, index) => [
       row.rank,
@@ -344,19 +329,9 @@ async function downloadReportXlsx(report) {
       roundScore(row.dailyAverageRatio),
       productCategoryFor(row.keyword),
       targetCategoryFor(row.keyword),
-      rankDeltaValue(row, previousRankByKeyword),
-      "",
-      index === 0 ? previousLabel : "",
-      "",
-      previousRows[index]?.rank || "",
-      previousRows[index]?.keyword || "",
-      previousRows[index] ? roundScore(previousRows[index].dailyAverageRatio) : "",
-      previousRows[index] ? productCategoryFor(previousRows[index].keyword) : "",
       "",
       PRODUCT_GROUPS[index] || "",
-      PRODUCT_GROUPS[index] ? roundScore(currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : "",
-      PRODUCT_GROUPS[index] ? roundScore(previousScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : "",
-      PRODUCT_GROUPS[index] ? roundScore((previousScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) - (currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0)) : ""
+      PRODUCT_GROUPS[index] ? roundScore(currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : ""
     ])
   ];
   const blob = createXlsxBlob("기간별 리포트", xlsxRows);
@@ -706,11 +681,6 @@ function scoreByProductGroup(rows) {
   return scores;
 }
 
-function rankDeltaValue(row, previousRankByKeyword) {
-  const previousRank = previousRankByKeyword.get(normalizeText(row.keyword));
-  return previousRank ? previousRank - Number(row.rank || 0) : "-";
-}
-
 function parseKeywordGroups(text) {
   return String(text || "")
     .split(/\r?\n/)
@@ -791,27 +761,6 @@ function renderTrendChart(months, matrix) {
       `;
     }).join("")}
   `;
-}
-
-async function loadPreviousReport(report) {
-  const previousKey = previousReportKey(report);
-  if (!previousKey) return null;
-
-  const response = await fetch(`/api/monthly-report?month=${encodeURIComponent(previousKey)}`);
-  if (!response.ok) return null;
-  return response.json();
-}
-
-function previousReportKey(report) {
-  const key = report.month || selectedMonth;
-  const index = reportKeys.indexOf(key);
-  if (index >= 0) return reportKeys[index + 1] || null;
-
-  const currentEnd = reportEndDate(report);
-  return reportKeys
-    .map((item) => ({ key: item, endDate: reportKeyEndDate(item) }))
-    .filter((item) => item.endDate && item.endDate < currentEnd)
-    .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]?.key || null;
 }
 
 function setPreviousMonthDates() {
@@ -1036,8 +985,7 @@ function worksheetXml(rows) {
     <col min="2" max="2" width="24" customWidth="1"/>
     <col min="3" max="3" width="14" customWidth="1"/>
     <col min="4" max="6" width="18" customWidth="1"/>
-    <col min="10" max="13" width="18" customWidth="1"/>
-    <col min="15" max="18" width="16" customWidth="1"/>
+    <col min="7" max="8" width="16" customWidth="1"/>
   </cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`;
