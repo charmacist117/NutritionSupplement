@@ -313,7 +313,6 @@ async function downloadReportXlsx(report) {
   const rows = report.rows || [];
   const previousReport = await loadPreviousReport(report);
   const previousRows = previousReport?.rows || [];
-  const categoryPath = categoryPathText(report);
   const previousLabel = previousReport ? periodLabel(previousReport) : "";
   const previousRankByKeyword = new Map(previousRows.map((row) => [normalizeText(row.keyword), row.rank]));
   const previousScoreByGroup = scoreByProductGroup(previousRows);
@@ -323,10 +322,6 @@ async function downloadReportXlsx(report) {
       "순위",
       "검색어",
       "일일 점수 평균",
-      "기준 키워드",
-      "시작일",
-      "종료일",
-      "카테고리",
       "제품군 분류",
       "타깃 분류",
       "직전 기간 순위 변동",
@@ -347,10 +342,6 @@ async function downloadReportXlsx(report) {
       row.rank,
       row.keyword,
       roundScore(row.dailyAverageRatio),
-      report.anchor?.keyword || "",
-      report.startDate || "",
-      report.endDate || "",
-      categoryPath,
       productCategoryFor(row.keyword),
       targetCategoryFor(row.keyword),
       rankDeltaValue(row, previousRankByKeyword),
@@ -1044,10 +1035,9 @@ function worksheetXml(rows) {
     <col min="1" max="1" width="8" customWidth="1"/>
     <col min="2" max="2" width="24" customWidth="1"/>
     <col min="3" max="3" width="14" customWidth="1"/>
-    <col min="4" max="7" width="14" customWidth="1"/>
-    <col min="8" max="10" width="18" customWidth="1"/>
-    <col min="14" max="17" width="18" customWidth="1"/>
-    <col min="19" max="22" width="16" customWidth="1"/>
+    <col min="4" max="6" width="18" customWidth="1"/>
+    <col min="10" max="13" width="18" customWidth="1"/>
+    <col min="15" max="18" width="16" customWidth="1"/>
   </cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`;
