@@ -12,9 +12,21 @@
         <div>
           <p class="eyebrow">Naver Shopping Insight</p>
           <h1>건강식품 월별 검색어 리포트</h1>
-          <p id="status">월별 데이터를 불러오는 중</p>
+          <p id="status">설정 상태를 확인하는 중입니다.</p>
         </div>
-        <button id="collect-button" type="button">직전월 수집</button>
+
+        <form id="collect-form" class="collect-form">
+          <label>
+            시작일
+            <input id="start-date" name="startDate" type="date" required>
+          </label>
+          <label>
+            종료일
+            <input id="end-date" name="endDate" type="date" required>
+          </label>
+          <button id="previous-month-button" type="button">직전월</button>
+          <button id="collect-button" type="submit">선택 기간 수집</button>
+        </form>
       </section>
 
       <section class="workspace">
@@ -27,7 +39,7 @@
           <div class="report-header">
             <div>
               <h2 id="report-title">리포트 선택</h2>
-              <p id="report-meta">월을 선택하면 Top 500 검색어와 평균 클릭량 점수가 표시됩니다.</p>
+              <p id="report-meta">월을 선택하거나 날짜를 지정해 수집하면 Top 500 검색어와 평균 클릭량 점수가 표시됩니다.</p>
             </div>
             <div class="metric">
               <span>기준 키워드</span>

@@ -4,16 +4,35 @@ const reportTitle = document.querySelector("#report-title");
 const reportMeta = document.querySelector("#report-meta");
 const reportBody = document.querySelector("#report-body");
 const anchorKeyword = document.querySelector("#anchor-keyword");
+const collectForm = document.querySelector("#collect-form");
 const collectButton = document.querySelector("#collect-button");
+const previousMonthButton = document.querySelector("#previous-month-button");
+const startDateInput = document.querySelector("#start-date");
+const endDateInput = document.querySelector("#end-date");
 
 let selectedMonth = null;
 
-collectButton.addEventListener("click", async () => {
+setPreviousMonthDates();
+
+previousMonthButton.addEventListener("click", () => {
+  setPreviousMonthDates();
+  statusText.textContent = "직전월 기간으로 설정했습니다.";
+});
+
+collectForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
   collectButton.disabled = true;
-  statusText.textContent = "직전월 데이터를 수집하는 중입니다.";
+  statusText.textContent = "선택한 기간의 데이터를 수집하는 중입니다.";
 
   try {
-    const response = await fetch("/api/collect-monthly", { method: "POST" });
+    const response = await fetch("/api/collect-monthly", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        startDate: startDateInput.value,
+        endDate: endDateInput.value
+      })
+    });
     const report = await response.json();
 
     if (!response.ok) {
@@ -21,11 +40,11 @@ collectButton.addEventListener("click", async () => {
       throw new Error(`${report.error || "수집에 실패했습니다."}${details}`);
     }
 
-    statusText.textContent = `${report.month} 수집이 완료되었습니다.`;
+    statusText.textContent = `${report.startDate} ~ ${report.endDate} 수집이 완료되었습니다.`;
     await loadMonths(report.month);
     renderReport(report);
     if (!monthList.querySelector(".month-button")) {
-      statusText.textContent = `${report.month} 수집이 완료되었습니다. Blob 저장소가 없으면 새로고침 후에는 사라질 수 있습니다.`;
+      statusText.textContent = `${report.startDate} ~ ${report.endDate} 수집이 완료되었습니다. Blob 저장소가 없으면 새로고침 후에는 사라질 수 있습니다.`;
     }
   } catch (error) {
     statusText.textContent = error.message;
@@ -45,13 +64,13 @@ async function loadHealth() {
     const health = await response.json();
 
     if (!health.naverConfigured) {
-      statusText.textContent = "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 환경변수가 필요합니다.";
+      statusText.textContent = "네이버 개발자센터에서 발급받은 Client ID / Secret을 Vercel 환경변수에 등록해야 합니다.";
       collectButton.disabled = true;
       return;
     }
 
     if (!health.blobConfigured) {
-      statusText.textContent = "Vercel Blob이 연결되지 않았습니다. 배포 환경에서는 월별 자료 저장이 되지 않을 수 있습니다.";
+      statusText.textContent = "Vercel Blob이 연결되지 않았습니다. 수집 결과는 표시되지만 저장되지 않을 수 있습니다.";
       return;
     }
 
@@ -70,7 +89,7 @@ async function loadMonths(preferredMonth = null) {
   if (!months.length) {
     monthList.innerHTML = `<p class="empty">아직 저장된 월별 자료가 없습니다.</p>`;
     if (!collectButton.disabled) {
-      statusText.textContent = "직전월 수집을 실행하면 자료가 생성됩니다.";
+      statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
     return;
   }
@@ -123,6 +142,23 @@ function renderReport(report) {
     `;
     reportBody.append(tr);
   }
+}
+
+function setPreviousMonthDates() {
+  const today = new Date();
+  const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = new Date(firstOfThisMonth.getTime() - 86400000);
+  const start = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  startDateInput.value = formatDate(start);
+  endDateInput.value = formatDate(end);
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function updateMonthSelection() {

@@ -45,6 +45,30 @@ body {
   gap: 20px;
 }
 
+.collect-form {
+  display: grid;
+  grid-template-columns: 142px 142px auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.collect-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.collect-form input {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink);
+  font: inherit;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -85,6 +109,17 @@ button {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+#previous-month-button {
+  background: #f8fafc;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+#previous-month-button:hover {
+  background: var(--soft);
+  color: var(--accent-strong);
 }
 
 button:hover {
@@ -202,6 +237,10 @@ td:last-child {
   .summary-band,
   .report-header {
     display: grid;
+  }
+
+  .collect-form {
+    grid-template-columns: 1fr;
   }
 
   .workspace {

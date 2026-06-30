@@ -13,7 +13,7 @@ export async function fetchPopularKeywordsWithBrowser(input) {
       const ranks = await page.evaluate(async ({ category, startDate, endDate, pageNo }) => {
         const body = new URLSearchParams({
           cid: category,
-          timeUnit: "month",
+          timeUnit: "date",
           startDate,
           endDate,
           page: String(pageNo),
@@ -32,7 +32,8 @@ export async function fetchPopularKeywordsWithBrowser(input) {
         try {
           return JSON.parse(text).ranks || [];
         } catch {
-          throw new Error(`Top 500 ranking response was not JSON. ${text.slice(0, 200)}`);
+          const plainText = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          throw new Error(`네이버 Top 500 응답이 JSON이 아닙니다. ${plainText.slice(0, 240)}`);
         }
       }, {
         category: input.category,

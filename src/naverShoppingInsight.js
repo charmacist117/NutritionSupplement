@@ -89,7 +89,7 @@ export async function fetchPopularKeywordPage(input) {
   const count = Number(input.count || 20);
   const body = new URLSearchParams({
     cid: String(input.category),
-    timeUnit: "month",
+    timeUnit: "date",
     startDate: input.startDate,
     endDate: input.endDate,
     page: String(page),

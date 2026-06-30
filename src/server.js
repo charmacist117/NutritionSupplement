@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectMonthlyNutritionKeywords, previousMonthRange } from "./monthlyCollector.js";
+import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentials, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { getMonthlyReport, listMonthlyReports } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
@@ -37,8 +37,11 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/collect-monthly") {
       const body = await readJson(request);
+      const range = body.startDate && body.endDate
+        ? normalizeCollectionRange({ startDate: body.startDate, endDate: body.endDate })
+        : body.range || previousMonthRange();
       const result = await collectMonthlyNutritionKeywords({
-        range: body.range || previousMonthRange(),
+        range,
         outputDir: join(rootDir, "data", "monthly"),
         popularKeywordFile: body.popularKeywordFile
       });

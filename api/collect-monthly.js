@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { collectMonthlyNutritionKeywords, previousMonthRange } from "../src/monthlyCollector.js";
+import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "../src/monthlyCollector.js";
 
 export const config = {
   maxDuration: 300
@@ -17,8 +17,12 @@ export default async function handler(request, response) {
   }
 
   try {
+    const body = parseBody(request.body);
+    const range = request.method === "POST" && body.startDate && body.endDate
+      ? normalizeCollectionRange({ startDate: body.startDate, endDate: body.endDate })
+      : previousMonthRange();
     const result = await collectMonthlyNutritionKeywords({
-      range: previousMonthRange(),
+      range,
       outputDir: process.env.VERCEL ? undefined : join(process.cwd(), "data", "monthly")
     });
 
@@ -36,5 +40,16 @@ export default async function handler(request, response) {
       error: error.message,
       details: error.details || null
     });
+  }
+}
+
+function parseBody(body) {
+  if (!body) return {};
+  if (typeof body === "object") return body;
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    return {};
   }
 }

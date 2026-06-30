@@ -17,6 +17,29 @@ export function previousMonthRange(now = new Date()) {
   };
 }
 
+export function normalizeCollectionRange(input = {}) {
+  const startDate = String(input.startDate || "").trim();
+  const endDate = String(input.endDate || "").trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    throw new NaverShoppingInsightError("시작일과 종료일은 YYYY-MM-DD 형식이어야 합니다.", 400);
+  }
+
+  if (startDate > endDate) {
+    throw new NaverShoppingInsightError("시작일은 종료일보다 늦을 수 없습니다.", 400);
+  }
+
+  if (startDate.slice(0, 7) !== endDate.slice(0, 7)) {
+    throw new NaverShoppingInsightError("월별 리포트는 같은 달 안의 기간만 수집할 수 있습니다.", 400);
+  }
+
+  return {
+    monthKey: startDate.slice(0, 7),
+    startDate,
+    endDate
+  };
+}
+
 export async function collectMonthlyNutritionKeywords(options = {}) {
   assertNaverCredentials();
 
