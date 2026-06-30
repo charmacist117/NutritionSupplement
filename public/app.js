@@ -78,6 +78,7 @@ const DEFAULT_KEYWORD_GROUPS = [
   "비타민C=비타민c,비타민씨",
   "관절=관절,MSM,msm,보스웰리아,호관원"
 ];
+const REPORT_ORDER_STORAGE_KEY = "reportOrder";
 
 let selectedMonth = null;
 let currentReport = null;
@@ -85,6 +86,7 @@ let reportKeys = [];
 let reportCache = new Map();
 let categoryMappings = new Map();
 let mappingRows = [];
+let draggedReportKey = null;
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -201,7 +203,7 @@ async function loadHealth() {
 async function loadMonths(preferredMonth = null) {
   const response = await fetch("/api/monthly-reports");
   const { months = [] } = response.ok ? await response.json() : { months: [] };
-  reportKeys = months;
+  reportKeys = applySavedReportOrder(months);
   reportCache = new Map();
 
   monthList.replaceChildren();
@@ -217,16 +219,45 @@ async function loadMonths(preferredMonth = null) {
     return;
   }
 
-  for (const month of months) {
+  renderMonthList();
+
+  const nextMonth = preferredMonth && reportKeys.includes(preferredMonth) ? preferredMonth : reportKeys[0];
+  await loadReport(nextMonth);
+  await renderTrendDashboard();
+  if (activeTab() === "mapping") await renderMappingSheet();
+}
+
+function renderMonthList() {
+  monthList.replaceChildren();
+
+  for (const month of reportKeys) {
     const item = document.createElement("div");
     item.className = "month-item";
+    item.dataset.reportKey = month;
+    item.addEventListener("dragover", handleReportDragOver);
+    item.addEventListener("dragleave", handleReportDragLeave);
+    item.addEventListener("drop", handleReportDrop);
+
+    const dragHandle = document.createElement("button");
+    dragHandle.type = "button";
+    dragHandle.textContent = "↕";
+    dragHandle.className = "month-drag-handle";
+    dragHandle.draggable = true;
+    dragHandle.title = `${periodLabel(month)} 순서 변경`;
+    dragHandle.setAttribute("aria-label", `${periodLabel(month)} 순서 변경`);
+    dragHandle.addEventListener("click", (event) => event.preventDefault());
+    dragHandle.addEventListener("dragstart", (event) => handleReportDragStart(event, month, item));
+    dragHandle.addEventListener("dragend", handleReportDragEnd);
 
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = periodLabel(month);
     button.dataset.reportKey = month;
     button.className = "month-button";
+    button.draggable = true;
     button.addEventListener("click", () => loadReport(month));
+    button.addEventListener("dragstart", (event) => handleReportDragStart(event, month, item));
+    button.addEventListener("dragend", handleReportDragEnd);
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
@@ -236,14 +267,11 @@ async function loadMonths(preferredMonth = null) {
     deleteButton.setAttribute("aria-label", `${periodLabel(month)} 리포트 삭제`);
     deleteButton.addEventListener("click", () => deleteReport(month));
 
-    item.append(button, deleteButton);
+    item.append(dragHandle, button, deleteButton);
     monthList.append(item);
   }
 
-  const nextMonth = preferredMonth && months.includes(preferredMonth) ? preferredMonth : months[0];
-  await loadReport(nextMonth);
-  await renderTrendDashboard();
-  if (activeTab() === "mapping") await renderMappingSheet();
+  updateMonthSelection();
 }
 
 async function setActiveTab(tab) {
@@ -363,6 +391,7 @@ async function deleteReport(month) {
 
     reportCache.delete(month);
     const remainingMonths = reportKeys.filter((key) => key !== month);
+    saveReportOrder(remainingMonths);
     const nextMonth = selectedMonth === month ? remainingMonths[0] || null : selectedMonth;
 
     if (currentReport?.month === month) clearReportView();
@@ -388,6 +417,102 @@ function setMonthListDisabled(disabled) {
   for (const button of monthList.querySelectorAll("button")) {
     button.disabled = disabled;
   }
+}
+
+function handleReportDragStart(event, month, item) {
+  draggedReportKey = month;
+  item.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", month);
+}
+
+function handleReportDragOver(event) {
+  if (!draggedReportKey) return;
+
+  event.preventDefault();
+  const item = event.currentTarget;
+  const targetKey = item.dataset.reportKey;
+  if (!targetKey || targetKey === draggedReportKey) return;
+
+  clearDropMarkers(item);
+  item.classList.add(dropPosition(event, item) === "before" ? "drop-before" : "drop-after");
+  event.dataTransfer.dropEffect = "move";
+}
+
+function handleReportDragLeave(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    clearDropMarkers(event.currentTarget);
+  }
+}
+
+async function handleReportDrop(event) {
+  event.preventDefault();
+  const item = event.currentTarget;
+  const sourceKey = event.dataTransfer.getData("text/plain") || draggedReportKey;
+  const targetKey = item.dataset.reportKey;
+  const position = dropPosition(event, item);
+
+  clearDropMarkers(item);
+  if (!moveReportKey(sourceKey, targetKey, position)) return;
+
+  statusText.textContent = "저장 자료 순서를 변경했습니다.";
+  await renderTrendDashboard();
+  if (activeTab() === "mapping") await renderMappingSheet();
+}
+
+function handleReportDragEnd() {
+  draggedReportKey = null;
+  for (const item of monthList.querySelectorAll(".month-item")) {
+    item.classList.remove("dragging", "drop-before", "drop-after");
+  }
+}
+
+function moveReportKey(sourceKey, targetKey, position) {
+  if (!sourceKey || !targetKey || sourceKey === targetKey) return false;
+  if (!reportKeys.includes(sourceKey) || !reportKeys.includes(targetKey)) return false;
+
+  const nextKeys = reportKeys.filter((key) => key !== sourceKey);
+  const targetIndex = nextKeys.indexOf(targetKey);
+  if (targetIndex === -1) return false;
+
+  nextKeys.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, sourceKey);
+  reportKeys = nextKeys;
+  saveReportOrder(reportKeys);
+  renderMonthList();
+  return true;
+}
+
+function dropPosition(event, item) {
+  const rect = item.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+}
+
+function clearDropMarkers(item) {
+  item.classList.remove("drop-before", "drop-after");
+}
+
+function applySavedReportOrder(keys) {
+  const savedOrder = readReportOrder();
+  const keySet = new Set(keys);
+  const ordered = savedOrder.filter((key) => keySet.has(key));
+  const newKeys = keys.filter((key) => !ordered.includes(key));
+  const result = [...newKeys, ...ordered];
+
+  if (savedOrder.length) saveReportOrder(result);
+  return result;
+}
+
+function readReportOrder() {
+  try {
+    const value = JSON.parse(localStorage.getItem(REPORT_ORDER_STORAGE_KEY) || "[]");
+    return Array.isArray(value) ? value.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReportOrder(keys) {
+  localStorage.setItem(REPORT_ORDER_STORAGE_KEY, JSON.stringify(keys));
 }
 
 function storageErrorMessage(storage) {
@@ -469,7 +594,7 @@ async function renderTrendDashboard() {
 
 async function loadAllReports() {
   const reports = [];
-  const orderedKeys = [...reportKeys].reverse();
+  const orderedKeys = chronologicalReportKeys(reportKeys);
 
   for (const key of orderedKeys) {
     const report = await fetchReport(key);
@@ -477,6 +602,21 @@ async function loadAllReports() {
   }
 
   return reports;
+}
+
+function chronologicalReportKeys(keys) {
+  return [...keys].sort((a, b) => reportSortValue(a).localeCompare(reportSortValue(b)));
+}
+
+function reportSortValue(key) {
+  const text = String(key || "");
+  const range = text.match(/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/);
+  if (range) return `${range[1]}_${range[2]}`;
+
+  const month = text.match(/^(\d{4}-\d{2})$/);
+  if (month) return `${text}-01_${lastDayOfMonth(text)}`;
+
+  return text;
 }
 
 async function fetchReport(month) {
