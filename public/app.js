@@ -9,6 +9,7 @@ const collectButton = document.querySelector("#collect-button");
 const previousMonthButton = document.querySelector("#previous-month-button");
 const startDateInput = document.querySelector("#start-date");
 const endDateInput = document.querySelector("#end-date");
+const saveReportButton = document.querySelector("#save-report-button");
 const downloadButton = document.querySelector("#download-button");
 const keywordGroupsInput = document.querySelector("#keyword-groups-input");
 const trendRunButton = document.querySelector("#trend-run-button");
@@ -102,10 +103,15 @@ downloadButton.addEventListener("click", async () => {
 
   downloadButton.disabled = true;
   try {
-    await downloadReportCsv(currentReport);
+    await downloadReportXlsx(currentReport);
   } finally {
     downloadButton.disabled = false;
   }
+});
+
+saveReportButton.addEventListener("click", async () => {
+  if (!currentReport) return;
+  await saveCurrentReport();
 });
 
 trendRunButton.addEventListener("click", async () => {
@@ -144,7 +150,9 @@ collectForm.addEventListener("submit", async (event) => {
       throw new Error(formatCollectionError(report));
     }
 
-    statusText.textContent = `${report.startDate} ~ ${report.endDate} 수집이 완료되었습니다.`;
+    statusText.textContent = report.saved
+      ? `${report.startDate} ~ ${report.endDate} 수집 및 저장이 완료되었습니다.`
+      : `${report.startDate} ~ ${report.endDate} 수집이 완료되었습니다. 리포트 저장은 별도로 필요합니다.`;
     await loadMonths(report.month);
     renderReport(report);
     if (!monthList.querySelector(".month-button")) {
@@ -204,7 +212,8 @@ async function loadMonths(preferredMonth = null) {
   for (const month of months) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = month;
+    button.textContent = periodLabel(month);
+    button.dataset.reportKey = month;
     button.className = "month-button";
     button.addEventListener("click", () => loadReport(month));
     monthList.append(button);
@@ -251,9 +260,10 @@ function renderReport(report) {
   currentReport = report;
   selectedMonth = report.month;
   updateMonthSelection();
+  saveReportButton.disabled = false;
   downloadButton.disabled = false;
 
-  reportTitle.textContent = `${report.month} 건강식품 Top ${report.count}`;
+  reportTitle.textContent = `${periodLabel(report)} 건강식품 Top ${report.count}`;
   reportMeta.textContent = `${report.startDate} ~ ${report.endDate} / ${categoryPathText(report)}`;
   anchorKeyword.textContent = report.anchor?.keyword || "-";
 
@@ -270,13 +280,45 @@ function renderReport(report) {
   }
 }
 
-async function downloadReportCsv(report) {
+async function saveCurrentReport() {
+  saveReportButton.disabled = true;
+  statusText.textContent = `${periodLabel(currentReport)} 리포트를 저장하는 중입니다.`;
+
+  try {
+    const response = await fetch("/api/monthly-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentReport)
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "리포트 저장에 실패했습니다.");
+    }
+
+    currentReport.saved = true;
+    currentReport.storage = result.storage;
+    reportCache.set(currentReport.month, currentReport);
+    await loadMonths(currentReport.month);
+    renderReport(currentReport);
+    statusText.textContent = `${periodLabel(currentReport)} 리포트를 저장했습니다.`;
+  } catch (error) {
+    statusText.textContent = error.message;
+  } finally {
+    saveReportButton.disabled = false;
+  }
+}
+
+async function downloadReportXlsx(report) {
   const rows = report.rows || [];
   const previousReport = await loadPreviousReport(report);
   const previousRows = previousReport?.rows || [];
   const categoryPath = categoryPathText(report);
-  const previousLabel = previousReport?.month || "";
-  const csvRows = [
+  const previousLabel = previousReport ? periodLabel(previousReport) : "";
+  const previousRankByKeyword = new Map(previousRows.map((row) => [normalizeText(row.keyword), row.rank]));
+  const previousScoreByGroup = scoreByProductGroup(previousRows);
+  const currentScoreByGroup = scoreByProductGroup(rows);
+  const xlsxRows = [
     [
       "순위",
       "검색어",
@@ -287,51 +329,50 @@ async function downloadReportCsv(report) {
       "카테고리",
       "제품군 분류",
       "타깃 분류",
-      "직전월 순위 변동",
+      "직전 기간 순위 변동",
       "",
-      "직전월 자료",
+      "직전 기간 자료",
       "",
-      "직전월 순위",
-      "직전월 검색어",
-      "직전월 점수",
-      "직전월 구분",
+      "직전 기간 순위",
+      "직전 기간 검색어",
+      "직전 기간 점수",
+      "직전 기간 구분",
       "",
       "구분",
-      "당월 총계",
-      "직전월 총계",
+      "선택 기간 총계",
+      "직전 기간 총계",
       "증감"
     ],
     ...rows.map((row, index) => [
       row.rank,
       row.keyword,
-      formatScore(row.dailyAverageRatio),
+      roundScore(row.dailyAverageRatio),
       report.anchor?.keyword || "",
       report.startDate || "",
       report.endDate || "",
       categoryPath,
-      manualCategoryFor(row.keyword) || productGroupFormula(index + 2),
-      targetGroupFormula(index + 2),
-      rankChangeFormula(index + 2),
+      productCategoryFor(row.keyword),
+      targetCategoryFor(row.keyword),
+      rankDeltaValue(row, previousRankByKeyword),
       "",
       index === 0 ? previousLabel : "",
       "",
       previousRows[index]?.rank || "",
       previousRows[index]?.keyword || "",
-      previousRows[index] ? formatScore(previousRows[index].dailyAverageRatio) : "",
-      previousRows[index] ? manualCategoryFor(previousRows[index].keyword) || productGroupFormula(index + 2, "O") : "",
+      previousRows[index] ? roundScore(previousRows[index].dailyAverageRatio) : "",
+      previousRows[index] ? productCategoryFor(previousRows[index].keyword) : "",
       "",
       PRODUCT_GROUPS[index] || "",
-      PRODUCT_GROUPS[index] ? categoryTotalFormula(index + 2, "current") : "",
-      PRODUCT_GROUPS[index] ? categoryTotalFormula(index + 2, "previous") : "",
-      PRODUCT_GROUPS[index] ? `=U${index + 2}-T${index + 2}` : ""
+      PRODUCT_GROUPS[index] ? roundScore(currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : "",
+      PRODUCT_GROUPS[index] ? roundScore(previousScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : "",
+      PRODUCT_GROUPS[index] ? roundScore((previousScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) - (currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0)) : ""
     ])
   ];
-  const csv = `\uFEFF${csvRows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const blob = createXlsxBlob("기간별 리포트", xlsxRows);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safeFileName(report.month || "naver-shopping-insight")}.csv`;
+  link.download = `${safeFileName(report.month || "naver-shopping-insight")}.xlsx`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -345,11 +386,11 @@ async function renderTrendDashboard() {
   if (!groups.length || !reports.length) {
     trendChart.replaceChildren();
     trendHead.innerHTML = "";
-    trendBody.innerHTML = `<tr><td>그룹 정의와 저장된 월별 자료가 필요합니다.</td></tr>`;
+    trendBody.innerHTML = `<tr><td>그룹 정의와 저장된 기간별 자료가 필요합니다.</td></tr>`;
     return;
   }
 
-  const months = reports.map((item) => item.month);
+  const months = reports.map((item) => periodLabel(item));
   const matrix = groups.map((group) => {
     const points = reports.map((report) => summarizeGroup(report, group));
     const latest = points[points.length - 1] || { score: 0, rank: null };
@@ -593,6 +634,92 @@ function manualCategoryFor(keyword) {
   return categoryMappings.get(normalizeText(keyword))?.category || "";
 }
 
+function productCategoryFor(keyword) {
+  return manualCategoryFor(keyword) || autoProductCategoryFor(keyword);
+}
+
+function autoProductCategoryFor(keyword) {
+  const kw = normalizeText(keyword);
+  const has = (term) => kw.includes(normalizeText(term));
+  const any = (terms) => terms.some(has);
+
+  if (has("오메가")) return "오메가3";
+  if (has("마그네슘")) return "마그네슘";
+  if (!any(["엘레나", "펨", "질", "구강"]) && any(["유산균", "락토핏", "프로바이오틱스", "드시모네", "자로우"])) return "유산균";
+  if (any(["프리바이오틱스", "푸룬", "낙산균"])) return "장 건강";
+  if (any(["비타민c", "압타민c"])) return "비타민c";
+  if (any(["비타민d", "비타민k"])) return "비타민dk";
+  if (any(["비타민", "비타", "오쏘몰", "센트룸"]) && !any(["비타민c", "압타민c", "비타민d", "비타민k"])) return "비타민 류";
+  if (any(["이뮨", "아연", "베타글루칸"])) return "면역 건강";
+  if (any(["콘드로이친", "msm", "난각막", "nem", "관절", "보스", "호관원", "옵티머스트", "우슬", "무브프리", "글루코사민"])) return "관절 건강";
+  if (any(["멜라토닌", "수면"])) return "수면 건강";
+  if (any(["루테인", "블루베리", "빌베리", "눈", "아스타잔틴"])) return "눈 건강";
+  if (has("글루타치온")) return "미백";
+  if (any(["nmn", "엔엠엔", "mnm"])) return "항노화";
+  if (any(["프로폴리스", "커큐민", "퀘르세틴", "브로멜라인", "강황", "테라큐민", "울금"])) return "항염증";
+  if (has("철분")) return "철분제";
+  if (any(["비오틴", "케라넷", "맥주"])) return "모발 건강";
+  if (has("효소")) return "효소식품";
+  if (any(["코엔자임", "코큐텐"])) return "코엔자임Q10";
+  if (any(["셀렌", "셀레늄"])) return "항산화";
+  if (any(["정관장", "홍삼", "에브리타임", "산삼", "장뇌삼", "홍이장군", "인삼"])) return "삼(蔘) 류";
+  if (any(["바나바", "뉴케어", "애사비"])) return "혈당";
+  if (any(["알부민", "펩티드"])) return "단백질";
+  if (any(["아르기닌", "마카", "쏘팔", "옥타", "전립", "장어", "카리토", "야관문"])) return "남성 건강";
+  if (any(["밀크씨슬", "밀크시슬", "간"])) return "간 건강";
+  if (any(["이노시톨", "엽산", "엘레나", "펨", "질"])) return "여성 건강";
+  if (any(["도라지", "맥문동"])) return "호흡기 건강";
+  if (has("홍국")) return "콜레스테롤";
+  if (any(["폴리코사놀", "리놀렌산", "대마종자", "솔잎증류", "송침", "보라지", "콜레스테롤", "순환", "은행잎"])) return "혈행 건강";
+  if (has("갱년기")) return "갱년기 건강";
+  if (any(["매스틱", "감초"])) return "위 건강";
+  if (any(["포스파티딜", "테아닌", "홍경천", "뇌"])) return "뇌 건강";
+  if (has("꿀")) return "꿀";
+  if (has("흑염소")) return "수족냉증";
+  if (any(["베르베린", "bnr", "비에날", "비엔알", "알파cd"])) return "다이어트";
+  if (any(["숙취", "벌나무"])) return "숙취해소";
+  if (any(["칼마디", "mbp", "칼슘"])) return "뼈 건강";
+  if (any(["침향환", "경옥고", "공진단", "공진당"])) return "피로회복";
+  if (any(["삼백초", "노즈"])) return "코 건강";
+  if (any(["구강", "덴티"])) return "구강 건강";
+  return "기타";
+}
+
+function targetCategoryFor(keyword) {
+  const kw = normalizeText(keyword);
+  const has = (term) => kw.includes(normalizeText(term));
+  const any = (terms) => terms.some(has);
+
+  const child = any(["어린이", "키즈", "마이타민", "아이키"])
+    || (has("키") && !has("키나제"))
+    || (has("아이클") && !any(["아이클리어", "아이클린"]));
+  if (child) return "어린이";
+  if (any(["유아", "신생아", "아기"])) return "아기";
+  if (any(["임산부", "엽산"])) return "임산부";
+  if (has("질")) return "여성";
+  if (any(["하이퍼셀", "아쿠아셀"])) return "흡수율";
+  if (has("맘")) return "가족";
+  return "";
+}
+
+function scoreByProductGroup(rows) {
+  const scores = new Map(PRODUCT_GROUPS.map((group) => [group, 0]));
+
+  for (const row of rows || []) {
+    const score = Number(row.dailyAverageRatio || 0);
+    const group = productCategoryFor(row.keyword);
+    scores.set("총합계", (scores.get("총합계") || 0) + score);
+    scores.set(group, (scores.get(group) || 0) + score);
+  }
+
+  return scores;
+}
+
+function rankDeltaValue(row, previousRankByKeyword) {
+  const previousRank = previousRankByKeyword.get(normalizeText(row.keyword));
+  return previousRank ? previousRank - Number(row.rank || 0) : "-";
+}
+
 function parseKeywordGroups(text) {
   return String(text || "")
     .split(/\r?\n/)
@@ -751,7 +878,7 @@ function formatDate(date) {
 
 function updateMonthSelection() {
   for (const button of monthList.querySelectorAll(".month-button")) {
-    button.classList.toggle("active", button.textContent === selectedMonth);
+    button.classList.toggle("active", button.dataset.reportKey === selectedMonth);
   }
 }
 
@@ -795,6 +922,265 @@ function categoryPathText(report) {
 
 function safeFileName(value) {
   return String(value).replace(/[^0-9A-Za-z._-]+/g, "_");
+}
+
+function periodLabel(reportOrKey) {
+  if (typeof reportOrKey === "object" && reportOrKey) {
+    return `${reportOrKey.startDate || ""} ~ ${reportOrKey.endDate || ""}`.trim();
+  }
+
+  const key = String(reportOrKey || "");
+  const range = key.match(/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/);
+  if (range) return `${range[1]} ~ ${range[2]}`;
+  return key;
+}
+
+function roundScore(value) {
+  return Number(Number(value || 0).toFixed(3));
+}
+
+function createXlsxBlob(sheetName, rows) {
+  const safeSheetName = sanitizeSheetName(sheetName);
+  const createdAt = new Date().toISOString();
+  const files = [
+    ["[Content_Types].xml", contentTypesXml()],
+    ["_rels/.rels", rootRelsXml()],
+    ["docProps/core.xml", coreXml(createdAt)],
+    ["docProps/app.xml", appXml()],
+    ["xl/workbook.xml", workbookXml(safeSheetName)],
+    ["xl/_rels/workbook.xml.rels", workbookRelsXml()],
+    ["xl/styles.xml", stylesXml()],
+    ["xl/worksheets/sheet1.xml", worksheetXml(rows)]
+  ];
+
+  return new Blob([zipFiles(files)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+}
+
+function sanitizeSheetName(value) {
+  return String(value || "Sheet1").replace(/[\\/?*:[\]]/g, " ").slice(0, 31) || "Sheet1";
+}
+
+function contentTypesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+}
+
+function rootRelsXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+}
+
+function coreXml(createdAt) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:creator>NutritionSupplement</dc:creator>
+  <cp:lastModifiedBy>NutritionSupplement</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:modified>
+</cp:coreProperties>`;
+}
+
+function appXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>NutritionSupplement</Application>
+</Properties>`;
+}
+
+function workbookXml(sheetName) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="${xmlEscape(sheetName)}" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`;
+}
+
+function workbookRelsXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+}
+
+function stylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+}
+
+function worksheetXml(rows) {
+  const sheetData = rows.map((row, rowIndex) => {
+    const rowNumber = rowIndex + 1;
+    const cells = row.map((value, columnIndex) => cellXml(value, rowNumber, columnIndex + 1)).join("");
+    return `<row r="${rowNumber}">${cells}</row>`;
+  }).join("");
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>
+    <col min="1" max="1" width="8" customWidth="1"/>
+    <col min="2" max="2" width="24" customWidth="1"/>
+    <col min="3" max="3" width="14" customWidth="1"/>
+    <col min="4" max="7" width="14" customWidth="1"/>
+    <col min="8" max="10" width="18" customWidth="1"/>
+    <col min="14" max="17" width="18" customWidth="1"/>
+    <col min="19" max="22" width="16" customWidth="1"/>
+  </cols>
+  <sheetData>${sheetData}</sheetData>
+</worksheet>`;
+}
+
+function cellXml(value, rowNumber, columnNumber) {
+  if (value === "" || value == null) return "";
+
+  const ref = `${columnName(columnNumber)}${rowNumber}`;
+  const style = rowNumber === 1 ? ` s="1"` : "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `<c r="${ref}"${style}><v>${value}</v></c>`;
+  }
+
+  return `<c r="${ref}" t="inlineStr"${style}><is><t>${xmlEscape(value)}</t></is></c>`;
+}
+
+function columnName(columnNumber) {
+  let name = "";
+  let cursor = columnNumber;
+  while (cursor > 0) {
+    const remainder = (cursor - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    cursor = Math.floor((cursor - 1) / 26);
+  }
+  return name;
+}
+
+function xmlEscape(value) {
+  return String(value).replace(/[<>&'"]/g, (char) => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "'": "&apos;",
+    '"': "&quot;"
+  }[char]));
+}
+
+function zipFiles(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const [name, content] of files) {
+    const nameBytes = encoder.encode(name);
+    const dataBytes = typeof content === "string" ? encoder.encode(content) : content;
+    const crc = crc32(dataBytes);
+    const localHeader = zipLocalHeader(nameBytes, dataBytes, crc);
+    const centralHeader = zipCentralHeader(nameBytes, dataBytes, crc, offset);
+
+    localParts.push(localHeader, dataBytes);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + dataBytes.length;
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = zipEndRecord(files.length, centralSize, offset);
+  return concatBytes([...localParts, ...centralParts, end]);
+}
+
+function zipLocalHeader(nameBytes, dataBytes, crc) {
+  const header = new Uint8Array(30 + nameBytes.length);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x04034b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint16(6, 0x0800, true);
+  view.setUint16(8, 0, true);
+  view.setUint16(10, 0, true);
+  view.setUint16(12, 0x5c21, true);
+  view.setUint32(14, crc, true);
+  view.setUint32(18, dataBytes.length, true);
+  view.setUint32(22, dataBytes.length, true);
+  view.setUint16(26, nameBytes.length, true);
+  header.set(nameBytes, 30);
+  return header;
+}
+
+function zipCentralHeader(nameBytes, dataBytes, crc, offset) {
+  const header = new Uint8Array(46 + nameBytes.length);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x02014b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint16(6, 20, true);
+  view.setUint16(8, 0x0800, true);
+  view.setUint16(10, 0, true);
+  view.setUint16(12, 0, true);
+  view.setUint16(14, 0x5c21, true);
+  view.setUint32(16, crc, true);
+  view.setUint32(20, dataBytes.length, true);
+  view.setUint32(24, dataBytes.length, true);
+  view.setUint16(28, nameBytes.length, true);
+  view.setUint32(42, offset, true);
+  header.set(nameBytes, 46);
+  return header;
+}
+
+function zipEndRecord(fileCount, centralSize, centralOffset) {
+  const header = new Uint8Array(22);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x06054b50, true);
+  view.setUint16(8, fileCount, true);
+  view.setUint16(10, fileCount, true);
+  view.setUint32(12, centralSize, true);
+  view.setUint32(16, centralOffset, true);
+  return header;
+}
+
+function concatBytes(parts) {
+  const size = parts.reduce((sum, part) => sum + part.length, 0);
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
+
+const CRC_TABLE = new Uint32Array(256).map((_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function rankChangeFormula(rowNumber) {

@@ -6,29 +6,37 @@ const SETTINGS_PREFIX = "settings";
 const KEYWORD_CATEGORY_MAPPINGS_PATH = `${SETTINGS_PREFIX}/keyword-category-mappings.json`;
 
 export async function saveMonthlyReport(result, options = {}) {
+  const report = normalizeMonthlyReport(result);
+
   if (shouldUseBlob()) {
     const { put } = await import("@vercel/blob");
-    await put(`${MONTHLY_PREFIX}/${result.month}.json`, JSON.stringify(result, null, 2), {
+    await put(`${MONTHLY_PREFIX}/${report.month}.json`, JSON.stringify(report, null, 2), {
       access: "public",
       allowOverwrite: true,
       contentType: "application/json"
     });
-    await put(`${MONTHLY_PREFIX}/${result.month}.csv`, toCsv(result.rows), {
+    await put(`${MONTHLY_PREFIX}/${report.month}.csv`, toCsv(report.rows), {
       access: "public",
       allowOverwrite: true,
       contentType: "text/csv; charset=utf-8"
     });
-    return;
+    return { saved: true, storage: "blob", key: report.month };
   }
 
   if (process.env.VERCEL) {
-    return;
+    return {
+      saved: false,
+      storage: "none",
+      key: report.month,
+      reason: "BLOB_READ_WRITE_TOKEN is not configured."
+    };
   }
 
   const outputDir = options.outputDir || join(process.cwd(), "data", "monthly");
   await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, `${result.month}.json`), `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  await writeFile(join(outputDir, `${result.month}.csv`), toCsv(result.rows), "utf8");
+  await writeFile(join(outputDir, `${report.month}.json`), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  await writeFile(join(outputDir, `${report.month}.csv`), toCsv(report.rows), "utf8");
+  return { saved: true, storage: "file", key: report.month };
 }
 
 export async function getMonthlyReport(month, options = {}) {
@@ -164,6 +172,54 @@ function normalizeMappingKey(value) {
 function isReportKey(value) {
   const key = String(value || "");
   return /^\d{4}-\d{2}$/.test(key) || /^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(key);
+}
+
+function normalizeMonthlyReport(input = {}) {
+  const startDate = String(input.startDate || "").trim();
+  const endDate = String(input.endDate || "").trim();
+  const month = String(input.month || rangeKey(startDate, endDate)).trim();
+
+  if (!isReportKey(month)) {
+    throw new Error("report key must use YYYY-MM or YYYY-MM-DD_YYYY-MM-DD format.");
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    throw new Error("report startDate and endDate must use YYYY-MM-DD format.");
+  }
+
+  if (!Array.isArray(input.rows)) {
+    throw new Error("report rows must be an array.");
+  }
+
+  return {
+    ...input,
+    month,
+    startDate,
+    endDate,
+    count: Number(input.count || input.rows.length),
+    rows: input.rows.map((row, index) => ({
+      ...row,
+      rank: Number(row.rank || index + 1),
+      keyword: String(row.keyword || "").trim(),
+      dailyAverageRatio: Number(row.dailyAverageRatio || 0)
+    })).filter((row) => row.keyword)
+  };
+}
+
+function rangeKey(startDate, endDate) {
+  if (!startDate || !endDate) return "";
+
+  const monthKey = startDate.slice(0, 7);
+  if (monthKey === endDate.slice(0, 7) && startDate.endsWith("-01") && endDate === lastDayOfMonth(monthKey)) {
+    return monthKey;
+  }
+
+  return `${startDate}_${endDate}`;
+}
+
+function lastDayOfMonth(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
 function toCsv(rows) {

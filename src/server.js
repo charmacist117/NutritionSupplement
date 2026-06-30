@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentialCount, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { getKeywordCategoryMappings, getMonthlyReport, listMonthlyReports, saveKeywordCategoryMappings } from "./storage.js";
+import { getKeywordCategoryMappings, getMonthlyReport, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
@@ -56,11 +56,20 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, { months });
     }
 
-    if (request.method === "GET" && url.pathname === "/api/monthly-report") {
-      const report = await getMonthlyReport(url.searchParams.get("month") || "", {
-        outputDir: join(rootDir, "data", "monthly")
-      });
-      return report ? sendJson(response, 200, report) : sendJson(response, 404, { error: "Monthly report not found." });
+    if (url.pathname === "/api/monthly-report") {
+      const options = { outputDir: join(rootDir, "data", "monthly") };
+      if (request.method === "GET") {
+        const report = await getMonthlyReport(url.searchParams.get("month") || "", options);
+        return report ? sendJson(response, 200, report) : sendJson(response, 404, { error: "Period report not found." });
+      }
+
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const storage = await saveMonthlyReport(body, options);
+        return storage.saved
+          ? sendJson(response, 200, { ok: true, storage })
+          : sendJson(response, 503, { ok: false, error: "Blob 저장소가 연결되지 않아 리포트를 저장할 수 없습니다.", storage });
+      }
     }
 
     if (url.pathname === "/api/keyword-category-mappings") {

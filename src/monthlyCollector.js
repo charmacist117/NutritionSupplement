@@ -72,7 +72,9 @@ export async function collectMonthlyNutritionKeywords(options = {}) {
   };
 
   if (options.persist !== false) {
-    await saveMonthlyReport(result, { outputDir: options.outputDir });
+    const storage = await saveMonthlyReport(result, { outputDir: options.outputDir });
+    result.saved = Boolean(storage?.saved);
+    result.storage = storage;
   }
 
   return result;

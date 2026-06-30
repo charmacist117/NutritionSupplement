@@ -35,6 +35,8 @@ export default async function handler(request, response) {
       categoryPath: result.categoryPath,
       anchor: result.anchor,
       count: result.count,
+      saved: result.saved,
+      storage: result.storage,
       rows: result.rows
     });
   } catch (error) {
