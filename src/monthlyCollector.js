@@ -22,19 +22,15 @@ export function normalizeCollectionRange(input = {}) {
   const endDate = String(input.endDate || "").trim();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    throw new NaverShoppingInsightError("시작일과 종료일은 YYYY-MM-DD 형식이어야 합니다.", 400);
+    throw new NaverShoppingInsightError("startDate and endDate must use YYYY-MM-DD format.", 400);
   }
 
   if (startDate > endDate) {
-    throw new NaverShoppingInsightError("시작일은 종료일보다 늦을 수 없습니다.", 400);
-  }
-
-  if (startDate.slice(0, 7) !== endDate.slice(0, 7)) {
-    throw new NaverShoppingInsightError("월별 리포트는 같은 달 안의 기간만 수집할 수 있습니다.", 400);
+    throw new NaverShoppingInsightError("startDate cannot be later than endDate.", 400);
   }
 
   return {
-    monthKey: startDate.slice(0, 7),
+    monthKey: rangeKey(startDate, endDate),
     startDate,
     endDate
   };
@@ -52,9 +48,7 @@ export async function collectMonthlyNutritionKeywords(options = {}) {
     limit: options.limit || 500
   });
 
-  if (popularKeywords.length < 5) {
-    throw new NaverShoppingInsightError("At least 5 popular keywords are required.", 400);
-  }
+  validatePopularKeywords(popularKeywords, options.limit || 500);
 
   const topKeywords = popularKeywords.slice(0, 5).map((item) => item.keyword);
   const anchor = await chooseAnchorKeyword({ category, range, keywords: topKeywords });
@@ -67,7 +61,7 @@ export async function collectMonthlyNutritionKeywords(options = {}) {
 
   const result = {
     collectedAt: new Date().toISOString(),
-    month: range.monthKey,
+    month: range.monthKey || rangeKey(range.startDate, range.endDate),
     startDate: range.startDate,
     endDate: range.endDate,
     category,
@@ -171,6 +165,28 @@ async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popu
   return [...byKeyword.values()].sort((a, b) => a.rank - b.rank);
 }
 
+function validatePopularKeywords(popularKeywords, expectedLimit) {
+  if (popularKeywords.length < 5) {
+    throw new NaverShoppingInsightError("At least 5 popular keywords are required.", 400);
+  }
+
+  const expectedCount = Math.min(expectedLimit, 500);
+  const uniqueKeywords = new Set(popularKeywords.map((item) => item.keyword));
+
+  if (popularKeywords.length < expectedCount) {
+    throw new NaverShoppingInsightError(`Only ${popularKeywords.length} of Top ${expectedCount} popular keywords were collected.`, 500);
+  }
+
+  if (uniqueKeywords.size !== popularKeywords.length) {
+    throw new NaverShoppingInsightError("Popular keyword collection contains duplicates.", 500);
+  }
+
+  const invalidRank = popularKeywords.find((item, index) => item.rank !== index + 1);
+  if (invalidRank) {
+    throw new NaverShoppingInsightError(`Popular keyword rank sequence is invalid at rank ${invalidRank.rank}.`, 500);
+  }
+}
+
 function parseKeywordList(text) {
   const parsed = tryJson(text);
   if (Array.isArray(parsed)) {
@@ -181,6 +197,19 @@ function parseKeywordList(text) {
     .split(/\r?\n/)
     .map((line) => line.split(",")[0].trim())
     .filter((line) => line && line !== "keyword");
+}
+
+function rangeKey(startDate, endDate) {
+  const monthKey = startDate.slice(0, 7);
+  if (monthKey === endDate.slice(0, 7) && startDate.endsWith("-01") && endDate === lastDayOfMonth(monthKey)) {
+    return monthKey;
+  }
+  return `${startDate}_${endDate}`;
+}
+
+function lastDayOfMonth(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
 function average(values) {

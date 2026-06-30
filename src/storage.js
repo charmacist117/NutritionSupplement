@@ -8,10 +8,12 @@ export async function saveMonthlyReport(result, options = {}) {
     const { put } = await import("@vercel/blob");
     await put(`${MONTHLY_PREFIX}/${result.month}.json`, JSON.stringify(result, null, 2), {
       access: "public",
+      allowOverwrite: true,
       contentType: "application/json"
     });
     await put(`${MONTHLY_PREFIX}/${result.month}.csv`, toCsv(result.rows), {
       access: "public",
+      allowOverwrite: true,
       contentType: "text/csv; charset=utf-8"
     });
     return;
@@ -28,8 +30,8 @@ export async function saveMonthlyReport(result, options = {}) {
 }
 
 export async function getMonthlyReport(month, options = {}) {
-  if (!/^\d{4}-\d{2}$/.test(month)) {
-    throw new Error("month must use YYYY-MM format.");
+  if (!isReportKey(month)) {
+    throw new Error("report key must use YYYY-MM or YYYY-MM-DD_YYYY-MM-DD format.");
   }
 
   if (shouldUseBlob()) {
@@ -56,7 +58,8 @@ export async function listMonthlyReports(options = {}) {
     const { list } = await import("@vercel/blob");
     const result = await list({ prefix: `${MONTHLY_PREFIX}/`, limit: 1000 });
     return result.blobs
-      .map((blob) => blob.pathname.match(/^monthly\/(\d{4}-\d{2})\.json$/)?.[1])
+      .map((blob) => blob.pathname.match(/^monthly\/([0-9_-]+)\.json$/)?.[1])
+      .filter(isReportKey)
       .filter(Boolean)
       .sort()
       .reverse();
@@ -66,7 +69,8 @@ export async function listMonthlyReports(options = {}) {
     const outputDir = options.outputDir || join(process.cwd(), "data", "monthly");
     const files = await readdir(outputDir);
     return files
-      .map((file) => file.match(/^(\d{4}-\d{2})\.json$/)?.[1])
+      .map((file) => file.match(/^([0-9_-]+)\.json$/)?.[1])
+      .filter(isReportKey)
       .filter(Boolean)
       .sort()
       .reverse();
@@ -77,6 +81,11 @@ export async function listMonthlyReports(options = {}) {
 
 function shouldUseBlob() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function isReportKey(value) {
+  const key = String(value || "");
+  return /^\d{4}-\d{2}$/.test(key) || /^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(key);
 }
 
 function toCsv(rows) {

@@ -14,12 +14,100 @@ export async function fetchPopularKeywordsWithBrowser(input) {
     await waitForNaverPage(page);
 
     try {
-      return await fetchPopularKeywordsWithPageAjax(page, input);
-    } catch (ajaxError) {
-      return await fetchPopularKeywordsWithVueFallback(page, input, ajaxError);
+      return await fetchPopularKeywordsFromVue(page, input);
+    } catch (vueError) {
+      return await fetchPopularKeywordsWithPageAjaxFallback(page, input, vueError);
     }
   } finally {
     await browser.close();
+  }
+}
+
+async function fetchPopularKeywordsFromVue(page, input) {
+  const limit = input.limit || 500;
+  const totalPages = Math.ceil(limit / 20);
+  const triggered = await page.evaluate(({ category, startDate, endDate }) => {
+    const component = findVueComponent((item) => item.pageType === "category" && item.requestParam && typeof item.onClickSubmit === "function");
+    if (!component) return false;
+
+    const dateLike = (value) => ({
+      format: (formatText = "YYYY-MM-DD") => formatText.includes(".") ? value.replaceAll("-", ".") : value
+    });
+
+    component.triggerSubmit = false;
+    component.requestParam.cid = Number(category);
+    component.requestParam.device = [];
+    component.requestParam.gender = [];
+    component.requestParam.age = [];
+    component.requestParam.period = {
+      timeDimension: "date",
+      from: startDate,
+      to: endDate,
+      dateFrom: dateLike(startDate),
+      dateTo: dateLike(endDate)
+    };
+    component.categoryData = {
+      cid: Number(category),
+      name: "\uAC74\uAC15\uC2DD\uD488",
+      fullPath: "\uC2DD\uD488 > \uAC74\uAC15\uC2DD\uD488"
+    };
+    component.onClickSubmit();
+    return true;
+
+    function findVueComponent(predicate) {
+      const roots = Array.from(document.querySelectorAll("*"))
+        .map((element) => element.__vue__)
+        .filter(Boolean);
+      const queue = roots.slice();
+      const seen = new Set();
+
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current || seen.has(current)) continue;
+        seen.add(current);
+        if (predicate(current)) return current;
+        queue.push(...(current.$children || []));
+      }
+
+      return null;
+    }
+  }, {
+    category: String(input.category),
+    startDate: input.startDate,
+    endDate: input.endDate
+  });
+
+  if (!triggered) {
+    throw new Error("Naver DataLab query component was not found.");
+  }
+
+  await waitForRankComponent(page, 1);
+
+  const rows = [];
+  for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
+    const ranks = await readRankComponent(page);
+    if (!ranks.length) {
+      throw new Error(`Naver Top 500 page ${pageNo} returned no keywords.`);
+    }
+
+    rows.push(...ranks.map((item, index) => ({
+      rank: (pageNo - 1) * 20 + index + 1,
+      keyword: item.keyword
+    })));
+
+    if (pageNo < totalPages) {
+      await clickNextRankPage(page, pageNo + 1, ranks[0]?.keyword || "");
+    }
+  }
+
+  return validatePopularKeywordRows(rows.slice(0, limit), limit);
+}
+
+async function fetchPopularKeywordsWithPageAjaxFallback(page, input, originalError) {
+  try {
+    return await fetchPopularKeywordsWithPageAjax(page, input);
+  } catch (ajaxError) {
+    throw withCause(ajaxError, originalError);
   }
 }
 
@@ -97,49 +185,15 @@ async function fetchPopularKeywordsWithPageAjax(page, input) {
     })));
   }
 
-  return rows.slice(0, limit);
+  return validatePopularKeywordRows(rows.slice(0, limit), limit);
 }
 
-async function fetchPopularKeywordsWithVueFallback(page, input, originalError) {
-  try {
-    return await fetchPopularKeywordsFromVue(page, input);
-  } catch (fallbackError) {
-    throw withCause(fallbackError, originalError);
-  }
-}
+async function clickNextRankPage(page, expectedPage, previousFirstKeyword) {
+  await page.evaluate(() => {
+    const component = findRankComponent();
+    component.onClickNext({ target: { className: "" } });
 
-async function fetchPopularKeywordsFromVue(page, input) {
-  const limit = input.limit || 500;
-  const totalPages = Math.ceil(limit / 20);
-  const triggered = await page.evaluate(({ category, startDate, endDate }) => {
-    const component = findVueComponent((item) => item.pageType === "category" && item.requestParam && typeof item.onClickSubmit === "function");
-    if (!component) return false;
-
-    const dateLike = (value) => ({
-      format: (formatText = "YYYY-MM-DD") => formatText.includes(".") ? value.replaceAll("-", ".") : value
-    });
-
-    component.triggerSubmit = false;
-    component.requestParam.cid = Number(category);
-    component.requestParam.device = [];
-    component.requestParam.gender = [];
-    component.requestParam.age = [];
-    component.requestParam.period = {
-      timeDimension: "date",
-      from: startDate,
-      to: endDate,
-      dateFrom: dateLike(startDate),
-      dateTo: dateLike(endDate)
-    };
-    component.categoryData = {
-      cid: Number(category),
-      name: "건강식품",
-      fullPath: "식품 > 건강식품"
-    };
-    component.onClickSubmit();
-    return true;
-
-    function findVueComponent(predicate) {
+    function findRankComponent() {
       const roots = Array.from(document.querySelectorAll("*"))
         .map((element) => element.__vue__)
         .filter(Boolean);
@@ -150,64 +204,37 @@ async function fetchPopularKeywordsFromVue(page, input) {
         const current = queue.shift();
         if (!current || seen.has(current)) continue;
         seen.add(current);
-        if (predicate(current)) return current;
+        if (Array.isArray(current.keywordList) && typeof current.onClickNext === "function") return current;
+        queue.push(...(current.$children || []));
+      }
+
+      throw new Error("Naver keyword rank component was not found.");
+    }
+  });
+
+  await page.waitForFunction(({ expectedPage: targetPage, previousFirstKeyword: previousKeyword }) => {
+    const component = findRankComponent();
+    const firstKeyword = component?.keywordList?.[0]?.keyword || component?.keywordList?.[0]?.name || "";
+    return component && component.page === targetPage && component.keywordList.length > 0 && firstKeyword !== previousKeyword;
+
+    function findRankComponent() {
+      const roots = Array.from(document.querySelectorAll("*"))
+        .map((element) => element.__vue__)
+        .filter(Boolean);
+      const queue = roots.slice();
+      const seen = new Set();
+
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current || seen.has(current)) continue;
+        seen.add(current);
+        if (Array.isArray(current.keywordList) && typeof current.onClickNext === "function") return current;
         queue.push(...(current.$children || []));
       }
 
       return null;
     }
-  }, {
-    category: String(input.category),
-    startDate: input.startDate,
-    endDate: input.endDate
-  });
-
-  if (!triggered) {
-    throw new Error("네이버 페이지의 조회 컴포넌트를 찾지 못했습니다.");
-  }
-
-  await waitForRankComponent(page, 1);
-
-  const rows = [];
-  for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
-    const ranks = await readRankComponent(page);
-    if (!ranks.length) {
-      throw new Error(`네이버 Top 500 ${pageNo}페이지 목록이 비어 있습니다.`);
-    }
-
-    rows.push(...ranks.map((item, index) => ({
-      rank: (pageNo - 1) * 20 + index + 1,
-      keyword: item.keyword
-    })));
-
-    if (pageNo < totalPages) {
-      await page.evaluate(() => {
-        const component = findRankComponent();
-        component.onClickNext({ target: { className: "" } });
-
-        function findRankComponent() {
-          const roots = Array.from(document.querySelectorAll("*"))
-            .map((element) => element.__vue__)
-            .filter(Boolean);
-          const queue = roots.slice();
-          const seen = new Set();
-
-          while (queue.length) {
-            const current = queue.shift();
-            if (!current || seen.has(current)) continue;
-            seen.add(current);
-            if (Array.isArray(current.keywordList) && typeof current.onClickNext === "function") return current;
-            queue.push(...(current.$children || []));
-          }
-
-          throw new Error("네이버 인기검색어 페이지 컴포넌트를 찾지 못했습니다.");
-        }
-      });
-      await waitForRankComponent(page, pageNo + 1);
-    }
-  }
-
-  return rows.slice(0, limit);
+  }, { timeout: 30000 }, { expectedPage, previousFirstKeyword });
 }
 
 async function readRankComponent(page) {
@@ -259,7 +286,7 @@ async function waitForRankComponent(page, pageNo) {
 
       return null;
     }
-  }, { timeout: 25000 }, pageNo);
+  }, { timeout: 30000 }, pageNo);
 }
 
 function parseRankResponse(response, pageNo) {
@@ -268,14 +295,34 @@ function parseRankResponse(response, pageNo) {
 
   if (!response?.ok || !parsed?.ranks) {
     const snippet = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-    throw new Error(`네이버 Top 500 ${pageNo}페이지 응답이 JSON이 아닙니다. status=${response?.status || 0}, content-type=${response?.contentType || "unknown"}${snippet ? `, body=${snippet}` : ""}`);
+    throw new Error(`Naver Top 500 page ${pageNo} response was not JSON. status=${response?.status || 0}, content-type=${response?.contentType || "unknown"}${snippet ? `, body=${snippet}` : ""}`);
   }
 
   if (!parsed.ranks.length) {
-    throw new Error(`네이버 Top 500 ${pageNo}페이지에 검색어가 없습니다.`);
+    throw new Error(`Naver Top 500 page ${pageNo} returned no keywords.`);
   }
 
   return parsed.ranks;
+}
+
+function validatePopularKeywordRows(rows, expectedLimit) {
+  const expectedCount = Math.min(expectedLimit, 500);
+  const uniqueKeywords = new Set(rows.map((row) => row.keyword));
+
+  if (rows.length < expectedCount) {
+    throw new Error(`Only ${rows.length} of Naver Top ${expectedCount} keywords were collected.`);
+  }
+
+  if (uniqueKeywords.size !== rows.length) {
+    throw new Error("Collected popular keywords contain duplicates. Naver page navigation did not advance correctly.");
+  }
+
+  const invalidRank = rows.find((row, index) => row.rank !== index + 1);
+  if (invalidRank) {
+    throw new Error(`Collected popular keyword rank is invalid. Rank ${invalidRank.rank} appears at row ${rows.indexOf(invalidRank) + 1}.`);
+  }
+
+  return rows;
 }
 
 async function preparePage(page) {
@@ -335,6 +382,6 @@ function tryJson(text) {
 }
 
 function withCause(error, cause) {
-  error.message = `${error.message} 최초 오류: ${cause.message}`;
+  error.message = `${error.message} Initial error: ${cause.message}`;
   return error;
 }

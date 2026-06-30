@@ -29,7 +29,10 @@ export default async function handler(request, response) {
     response.status(200).json({
       ok: true,
       month: result.month,
+      startDate: result.startDate,
+      endDate: result.endDate,
       category: result.category,
+      categoryPath: result.categoryPath,
       anchor: result.anchor,
       count: result.count,
       rows: result.rows
