@@ -238,23 +238,13 @@ function renderMonthList() {
     item.addEventListener("dragleave", handleReportDragLeave);
     item.addEventListener("drop", handleReportDrop);
 
-    const dragHandle = document.createElement("button");
-    dragHandle.type = "button";
-    dragHandle.textContent = "↕";
-    dragHandle.className = "month-drag-handle";
-    dragHandle.draggable = true;
-    dragHandle.title = `${periodLabel(month)} 순서 변경`;
-    dragHandle.setAttribute("aria-label", `${periodLabel(month)} 순서 변경`);
-    dragHandle.addEventListener("click", (event) => event.preventDefault());
-    dragHandle.addEventListener("dragstart", (event) => handleReportDragStart(event, month, item));
-    dragHandle.addEventListener("dragend", handleReportDragEnd);
-
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = periodLabel(month);
     button.dataset.reportKey = month;
     button.className = "month-button";
     button.draggable = true;
+    button.title = "드래그해서 저장 자료 순서 변경";
     button.addEventListener("click", () => loadReport(month));
     button.addEventListener("dragstart", (event) => handleReportDragStart(event, month, item));
     button.addEventListener("dragend", handleReportDragEnd);
@@ -267,7 +257,7 @@ function renderMonthList() {
     deleteButton.setAttribute("aria-label", `${periodLabel(month)} 리포트 삭제`);
     deleteButton.addEventListener("click", () => deleteReport(month));
 
-    item.append(dragHandle, button, deleteButton);
+    item.append(button, deleteButton);
     monthList.append(item);
   }
 

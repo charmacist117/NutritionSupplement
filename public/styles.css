@@ -182,7 +182,7 @@ button:disabled {
 
 .month-item {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 50px;
+  grid-template-columns: minmax(0, 1fr) 50px;
   gap: 6px;
   align-items: stretch;
 }
@@ -199,25 +199,6 @@ button:disabled {
   box-shadow: 0 3px 0 var(--accent);
 }
 
-.month-drag-handle {
-  min-height: 48px;
-  padding: 0;
-  background: #eef2f7;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  cursor: grab;
-  font-size: 16px;
-}
-
-.month-drag-handle:hover {
-  background: var(--soft);
-  color: var(--accent-strong);
-}
-
-.month-drag-handle:active {
-  cursor: grabbing;
-}
-
 .month-button {
   width: 100%;
   min-height: 48px;
@@ -228,6 +209,11 @@ button:disabled {
   text-align: left;
   line-height: 1.25;
   white-space: normal;
+  cursor: grab;
+}
+
+.month-button:active {
+  cursor: grabbing;
 }
 
 .month-button:hover,
