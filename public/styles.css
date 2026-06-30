@@ -30,7 +30,8 @@ body {
 
 .summary-band,
 .month-panel,
-.report-panel {
+.report-panel,
+.trend-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -212,6 +213,62 @@ button:disabled {
   border-radius: 6px;
 }
 
+.trend-panel {
+  padding: 20px;
+}
+
+.trend-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.trend-header p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#keyword-groups-input {
+  width: 100%;
+  min-height: 118px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: 13px/1.5 Consolas, "Noto Sans KR", monospace;
+  resize: vertical;
+}
+
+.trend-chart-wrap {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fbfcfd;
+}
+
+#trend-chart {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+}
+
+#trend-chart .axis {
+  stroke: var(--line);
+}
+
+#trend-chart .axis-label,
+#trend-chart .legend {
+  font-size: 12px;
+}
+
+.trend-table-wrap {
+  max-height: 460px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -245,7 +302,8 @@ td:last-child {
 
 @media (max-width: 780px) {
   .summary-band,
-  .report-header {
+  .report-header,
+  .trend-header {
     display: grid;
   }
 
