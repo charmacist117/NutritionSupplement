@@ -1,4 +1,4 @@
-import { fetchKeywordTrends, getNaverCredentials } from "../src/naverShoppingInsight.js";
+import { fetchKeywordTrends } from "../src/naverShoppingInsight.js";
 
 export default async function handler(request, response) {
   if (request.method !== "POST") {
@@ -6,7 +6,7 @@ export default async function handler(request, response) {
   }
 
   try {
-    const result = await fetchKeywordTrends(request.body || {}, getNaverCredentials());
+    const result = await fetchKeywordTrends(request.body || {});
     response.status(200).json(result);
   } catch (error) {
     response.status(error.status || 500).json({

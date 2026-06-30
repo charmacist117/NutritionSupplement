@@ -16,16 +16,37 @@ export class NaverShoppingInsightError extends Error {
 }
 
 export function getNaverCredentials(env = process.env) {
-  return {
+  const credentials = getNaverCredentialPool(env);
+  return credentials[0] || {
     clientId: env.NAVER_CLIENT_ID,
     clientSecret: env.NAVER_CLIENT_SECRET
   };
 }
 
-export function assertNaverCredentials(credentials = getNaverCredentials()) {
-  if (!credentials.clientId || !credentials.clientSecret) {
+export function getNaverCredentialPool(env = process.env) {
+  const credentials = [];
+
+  for (const item of parseNaverClientsJson(env.NAVER_CLIENTS_JSON)) {
+    addCredential(credentials, item.clientId || item.NAVER_CLIENT_ID || item.id, item.clientSecret || item.NAVER_CLIENT_SECRET || item.secret);
+  }
+
+  for (let index = 1; index <= 20; index += 1) {
+    addCredential(credentials, env[`NAVER_CLIENT_ID_${index}`], env[`NAVER_CLIENT_SECRET_${index}`]);
+  }
+
+  addCredential(credentials, env.NAVER_CLIENT_ID, env.NAVER_CLIENT_SECRET);
+
+  return dedupeCredentials(credentials);
+}
+
+export function getNaverCredentialCount(env = process.env) {
+  return getNaverCredentialPool(env).length;
+}
+
+export function assertNaverCredentials(credentials = getNaverCredentialPool()) {
+  if (!normalizeCredentialPool(credentials).length) {
     throw new NaverShoppingInsightError(
-      "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 환경변수가 필요합니다.",
+      "네이버 Open API 환경변수가 필요합니다. NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 또는 NAVER_CLIENT_ID_1/NAVER_CLIENT_SECRET_1을 설정해주세요.",
       500
     );
   }
@@ -63,60 +84,75 @@ export function buildKeywordPayload(input) {
   return payload;
 }
 
-export async function fetchKeywordTrends(input, credentials = getNaverCredentials()) {
-  assertNaverCredentials(credentials);
+export async function fetchKeywordTrends(input, credentials = getNaverCredentialPool()) {
+  const credentialPool = normalizeCredentialPool(credentials);
+  assertNaverCredentials(credentialPool);
 
   const payload = buildKeywordPayload(input);
+  const quotaErrors = [];
 
-  for (let attempt = 0; attempt <= KEYWORD_RETRY_DELAYS_MS.length; attempt += 1) {
-    await throttleKeywordRequest();
+  for (let credentialIndex = 0; credentialIndex < credentialPool.length; credentialIndex += 1) {
+    const credential = credentialPool[credentialIndex];
 
-    const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Naver-Client-Id": credentials.clientId,
-        "X-Naver-Client-Secret": credentials.clientSecret
-      },
-      body: JSON.stringify(payload)
-    });
+    for (let attempt = 0; attempt <= KEYWORD_RETRY_DELAYS_MS.length; attempt += 1) {
+      await throttleKeywordRequest();
 
-    const text = await response.text();
-    const body = parseJson(text);
+      const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Naver-Client-Id": credential.clientId,
+          "X-Naver-Client-Secret": credential.clientSecret
+        },
+        body: JSON.stringify(payload)
+      });
 
-    if (response.ok) return body;
+      const text = await response.text();
+      const body = parseJson(text);
 
-    if (isKeywordQuotaExceeded(body)) {
+      if (response.ok) return body;
+
+      if (isKeywordQuotaExceeded(body)) {
+        quotaErrors.push({
+          credentialIndex: credentialIndex + 1,
+          response: body
+        });
+        break;
+      }
+
+      if (shouldRetryKeywordRequest(response.status, body) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
+        await sleep(KEYWORD_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+
       throw new NaverShoppingInsightError(
-        "네이버 Open API 일일 호출 한도를 모두 사용했습니다. 한도 초기화 후 다시 수집해주세요.",
+        `Naver Shopping Insight request failed. status=${response.status}`,
         response.status,
         {
-          response: body,
+          response: body || text.slice(0, 700),
           request: summarizeKeywordPayload(payload),
-          attempts: attempt + 1
+          attempts: attempt + 1,
+          credentials: {
+            current: credentialIndex + 1,
+            total: credentialPool.length
+          }
         }
       );
     }
-
-    if (shouldRetryKeywordRequest(response.status, body) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
-      await sleep(KEYWORD_RETRY_DELAYS_MS[attempt]);
-      continue;
-    }
-
-    throw new NaverShoppingInsightError(
-      `Naver Shopping Insight request failed. status=${response.status}`,
-      response.status,
-      {
-        response: body || text.slice(0, 700),
-        request: summarizeKeywordPayload(payload),
-        attempts: attempt + 1
-      }
-    );
   }
 
-  throw new NaverShoppingInsightError("Naver Shopping Insight request failed.", 500, {
-    request: summarizeKeywordPayload(payload)
-  });
+  throw new NaverShoppingInsightError(
+    "등록된 모든 네이버 Open API 키의 일일 호출 한도를 모두 사용했습니다. 한도 초기화 후 다시 수집해주세요.",
+    429,
+    {
+      response: quotaErrors.at(-1)?.response || null,
+      request: summarizeKeywordPayload(payload),
+      credentials: {
+        exhausted: quotaErrors.length,
+        total: credentialPool.length
+      }
+    }
+  );
 }
 
 export async function fetchPopularKeywordPage(input) {
@@ -164,6 +200,49 @@ export async function fetchPopularKeywords(input) {
   }
 
   return rows.slice(0, input.limit || 500);
+}
+
+function parseNaverClientsJson(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    throw new NaverShoppingInsightError("NAVER_CLIENTS_JSON 환경변수는 JSON 배열 형식이어야 합니다.", 500);
+  }
+}
+
+function addCredential(credentials, clientId, clientSecret) {
+  const id = String(clientId || "").trim();
+  const secret = String(clientSecret || "").trim();
+  if (!id || !secret) return;
+
+  credentials.push({
+    clientId: id,
+    clientSecret: secret
+  });
+}
+
+function dedupeCredentials(credentials) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const credential of credentials) {
+    const key = `${credential.clientId}\u0000${credential.clientSecret}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(credential);
+  }
+
+  return unique;
+}
+
+function normalizeCredentialPool(credentials) {
+  if (Array.isArray(credentials)) return credentials.filter((item) => item?.clientId && item?.clientSecret);
+  if (credentials?.clientId && credentials?.clientSecret) return [credentials];
+  return [];
 }
 
 function requireDate(value, fieldName) {

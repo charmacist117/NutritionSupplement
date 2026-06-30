@@ -169,7 +169,7 @@ async function loadHealth() {
     const health = await response.json();
 
     if (!health.naverConfigured) {
-      statusText.textContent = "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 환경변수가 필요합니다.";
+      statusText.textContent = "네이버 Open API 환경변수가 필요합니다. NAVER_CLIENT_ID_1 / NAVER_CLIENT_SECRET_1부터 설정해주세요.";
       collectButton.disabled = true;
       return;
     }
@@ -179,7 +179,7 @@ async function loadHealth() {
       return;
     }
 
-    statusText.textContent = "수집 준비가 완료되었습니다.";
+    statusText.textContent = `수집 준비가 완료되었습니다. 네이버 API 키 ${health.naverCredentialCount || 1}개를 사용할 수 있습니다.`;
   } catch {
     statusText.textContent = "설정 상태를 확인하지 못했습니다.";
   }
@@ -737,7 +737,9 @@ function quotaExceededSummary(details) {
   }
 
   const quota = String(response.errorMessage || "").match(/count\/quota=([^}]+)/)?.[1];
-  return quota ? `사용량 ${quota}` : "일일 한도 초과";
+  const credentials = details?.credentials;
+  const keyText = credentials?.total ? `API 키 ${credentials.exhausted || credentials.current || 1}/${credentials.total}개, ` : "";
+  return quota ? `${keyText}사용량 ${quota}` : `${keyText}일일 한도 초과`;
 }
 
 function formatDate(date) {

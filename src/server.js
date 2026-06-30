@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
-import { fetchKeywordTrends, getNaverCredentials, NaverShoppingInsightError } from "./naverShoppingInsight.js";
+import { fetchKeywordTrends, getNaverCredentialCount, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { getKeywordCategoryMappings, getMonthlyReport, listMonthlyReports, saveKeywordCategoryMappings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 
@@ -20,9 +20,11 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
 
     if (request.method === "GET" && url.pathname === "/api/health") {
+      const naverCredentialCount = safeNaverCredentialCount();
       return sendJson(response, 200, {
         ok: true,
-        naverConfigured: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET),
+        naverConfigured: naverCredentialCount > 0,
+        naverCredentialCount,
         blobConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
         category: HEALTH_FOOD_CATEGORY
       });
@@ -30,7 +32,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && (url.pathname === "/api/shopping/keywords" || url.pathname === "/api/shopping-keywords")) {
       const body = await readJson(request);
-      const result = await fetchKeywordTrends(body, getNaverCredentials());
+      const result = await fetchKeywordTrends(body);
 
       return sendJson(response, 200, result);
     }
@@ -172,5 +174,13 @@ function loadLocalEnv() {
     const key = trimmed.slice(0, index).trim();
     const value = trimmed.slice(index + 1).trim();
     if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+function safeNaverCredentialCount() {
+  try {
+    return getNaverCredentialCount();
+  } catch {
+    return 0;
   }
 }
