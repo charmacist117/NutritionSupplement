@@ -15,6 +15,14 @@ const trendRunButton = document.querySelector("#trend-run-button");
 const trendHead = document.querySelector("#trend-head");
 const trendBody = document.querySelector("#trend-body");
 const trendChart = document.querySelector("#trend-chart");
+const tabButtons = [...document.querySelectorAll("[data-tab]")];
+const tabViews = [...document.querySelectorAll("[data-tab-view]")];
+const mappingRefreshButton = document.querySelector("#mapping-refresh-button");
+const mappingSaveButton = document.querySelector("#mapping-save-button");
+const mappingSearch = document.querySelector("#mapping-search");
+const mappingFilter = document.querySelector("#mapping-filter");
+const mappingStatus = document.querySelector("#mapping-status");
+const mappingBody = document.querySelector("#mapping-body");
 const PRODUCT_GROUPS = [
   "총합계",
   "오메가3",
@@ -74,9 +82,15 @@ let selectedMonth = null;
 let currentReport = null;
 let reportKeys = [];
 let reportCache = new Map();
+let categoryMappings = new Map();
+let mappingRows = [];
 
 setPreviousMonthDates();
 keywordGroupsInput.value = localStorage.getItem("keywordGroups") || DEFAULT_KEYWORD_GROUPS.join("\n");
+
+for (const button of tabButtons) {
+  button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+}
 
 previousMonthButton.addEventListener("click", () => {
   setPreviousMonthDates();
@@ -98,6 +112,17 @@ trendRunButton.addEventListener("click", async () => {
   localStorage.setItem("keywordGroups", keywordGroupsInput.value);
   await renderTrendDashboard();
 });
+
+mappingRefreshButton.addEventListener("click", async () => {
+  await renderMappingSheet({ refreshReports: true });
+});
+
+mappingSaveButton.addEventListener("click", async () => {
+  await saveCategoryMappingsFromSheet();
+});
+
+mappingSearch.addEventListener("input", () => renderMappingRows());
+mappingFilter.addEventListener("change", () => renderMappingRows());
 
 collectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -134,6 +159,7 @@ collectForm.addEventListener("submit", async (event) => {
 });
 
 await loadHealth();
+await loadCategoryMappings();
 await loadMonths();
 
 async function loadHealth() {
@@ -187,6 +213,23 @@ async function loadMonths(preferredMonth = null) {
 
   await loadReport(preferredMonth || months[0]);
   await renderTrendDashboard();
+  if (activeTab() === "mapping") await renderMappingSheet();
+}
+
+async function setActiveTab(tab) {
+  for (const button of tabButtons) {
+    button.classList.toggle("active", button.dataset.tab === tab);
+  }
+
+  for (const view of tabViews) {
+    view.classList.toggle("active", view.dataset.tabView === tab);
+  }
+
+  if (tab === "mapping") await renderMappingSheet();
+}
+
+function activeTab() {
+  return tabButtons.find((button) => button.classList.contains("active"))?.dataset.tab || "reports";
 }
 
 async function loadReport(month) {
@@ -267,7 +310,7 @@ async function downloadReportCsv(report) {
       report.startDate || "",
       report.endDate || "",
       categoryPath,
-      productGroupFormula(index + 2),
+      manualCategoryFor(row.keyword) || productGroupFormula(index + 2),
       targetGroupFormula(index + 2),
       rankChangeFormula(index + 2),
       "",
@@ -276,7 +319,7 @@ async function downloadReportCsv(report) {
       previousRows[index]?.rank || "",
       previousRows[index]?.keyword || "",
       previousRows[index] ? formatScore(previousRows[index].dailyAverageRatio) : "",
-      previousRows[index] ? productGroupFormula(index + 2, "O") : "",
+      previousRows[index] ? manualCategoryFor(previousRows[index].keyword) || productGroupFormula(index + 2, "O") : "",
       "",
       PRODUCT_GROUPS[index] || "",
       PRODUCT_GROUPS[index] ? categoryTotalFormula(index + 2, "current") : "",
@@ -351,6 +394,204 @@ async function fetchReport(month) {
   const report = await response.json();
   reportCache.set(month, report);
   return report;
+}
+
+async function loadCategoryMappings() {
+  try {
+    const response = await fetch("/api/keyword-category-mappings");
+    if (!response.ok) return;
+
+    setCategoryMappings(await response.json());
+  } catch {
+    categoryMappings = new Map();
+  }
+}
+
+function setCategoryMappings(data) {
+  categoryMappings = new Map();
+
+  for (const item of data?.mappings || []) {
+    const keyword = String(item.keyword || "").trim();
+    const category = String(item.category || "").trim();
+    if (!keyword || !category) continue;
+    categoryMappings.set(normalizeText(keyword), { keyword, category });
+  }
+}
+
+async function renderMappingSheet(options = {}) {
+  if (!reportKeys.length) {
+    mappingRows = [];
+    mappingStatus.textContent = "저장된 리포트가 없어 매칭할 키워드가 없습니다.";
+    mappingBody.innerHTML = `<tr><td colspan="5">저장된 리포트가 없습니다.</td></tr>`;
+    return;
+  }
+
+  mappingRefreshButton.disabled = true;
+  try {
+    if (options.refreshReports) reportCache = new Map();
+
+    const reports = await loadAllReports();
+    mappingRows = buildMappingRows(reports);
+    renderMappingRows();
+  } finally {
+    mappingRefreshButton.disabled = false;
+  }
+}
+
+function buildMappingRows(reports) {
+  const byKeyword = new Map();
+
+  for (const report of reports) {
+    for (const row of report.rows || []) {
+      const key = normalizeText(row.keyword);
+      if (!key) continue;
+
+      const existing = byKeyword.get(key) || {
+        key,
+        keyword: row.keyword,
+        monthCount: 0,
+        latestMonth: "",
+        latestEndDate: "",
+        latestRank: null,
+        latestScore: 0
+      };
+      const endDate = reportEndDate(report);
+
+      existing.monthCount += 1;
+      if (!existing.latestEndDate || endDate >= existing.latestEndDate) {
+        existing.keyword = row.keyword;
+        existing.latestMonth = report.month;
+        existing.latestEndDate = endDate;
+        existing.latestRank = row.rank;
+        existing.latestScore = Number(row.dailyAverageRatio || 0);
+      }
+
+      byKeyword.set(key, existing);
+    }
+  }
+
+  return [...byKeyword.values()].sort((a, b) => {
+    const aMapped = manualCategoryFor(a.keyword) ? 1 : 0;
+    const bMapped = manualCategoryFor(b.keyword) ? 1 : 0;
+    return aMapped - bMapped || Number(a.latestRank || 9999) - Number(b.latestRank || 9999) || a.keyword.localeCompare(b.keyword, "ko");
+  });
+}
+
+function renderMappingRows() {
+  const search = normalizeText(mappingSearch.value);
+  const filter = mappingFilter.value;
+  const rows = mappingRows.filter((row) => {
+    const mapped = Boolean(manualCategoryFor(row.keyword));
+    if (filter === "mapped" && !mapped) return false;
+    if (filter === "unmapped" && mapped) return false;
+    return !search || normalizeText(row.keyword).includes(search);
+  });
+  const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
+
+  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 매칭 완료 ${mappedCount}개`;
+  mappingBody.replaceChildren();
+
+  if (!rows.length) {
+    mappingBody.innerHTML = `<tr><td colspan="5">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const keywordCell = document.createElement("td");
+    const monthCell = document.createElement("td");
+    const rankCell = document.createElement("td");
+    const scoreCell = document.createElement("td");
+    const categoryCell = document.createElement("td");
+    const select = createCategorySelect(row.keyword);
+
+    keywordCell.textContent = row.keyword;
+    monthCell.textContent = row.latestMonth || "-";
+    rankCell.textContent = row.latestRank || "-";
+    scoreCell.textContent = formatScore(row.latestScore);
+    categoryCell.append(select);
+
+    tr.append(keywordCell, monthCell, rankCell, scoreCell, categoryCell);
+    fragment.append(tr);
+  }
+
+  mappingBody.append(fragment);
+}
+
+function createCategorySelect(keyword) {
+  const select = document.createElement("select");
+  select.className = "category-select";
+  select.dataset.keyword = keyword;
+
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = "미지정";
+  select.append(emptyOption);
+
+  for (const category of PRODUCT_GROUPS.filter((item) => item !== "총합계")) {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    select.append(option);
+  }
+
+  select.value = manualCategoryFor(keyword);
+  select.addEventListener("change", () => {
+    updateCategoryMapping(keyword, select.value);
+    const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
+    mappingStatus.textContent = `총 ${mappingRows.length}개 · 매칭 완료 ${mappedCount}개 · 저장 필요`;
+  });
+
+  return select;
+}
+
+function updateCategoryMapping(keyword, category) {
+  const key = normalizeText(keyword);
+  if (!key) return;
+
+  if (!category) {
+    categoryMappings.delete(key);
+    return;
+  }
+
+  categoryMappings.set(key, {
+    keyword,
+    category
+  });
+}
+
+async function saveCategoryMappingsFromSheet() {
+  mappingSaveButton.disabled = true;
+  mappingStatus.textContent = "카테고리 매칭을 저장하는 중입니다.";
+
+  try {
+    const mappings = [...categoryMappings.values()]
+      .filter((item) => item.keyword && item.category)
+      .sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"));
+    const response = await fetch("/api/keyword-category-mappings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mappings })
+    });
+    const saved = await response.json();
+
+    if (!response.ok) {
+      throw new Error(saved.error || "카테고리 매칭 저장에 실패했습니다.");
+    }
+
+    setCategoryMappings(saved);
+    renderMappingRows();
+    mappingStatus.textContent = `${saved.mappings.length}개 키워드 매칭을 저장했습니다.`;
+  } catch (error) {
+    mappingStatus.textContent = error.message;
+  } finally {
+    mappingSaveButton.disabled = false;
+  }
+}
+
+function manualCategoryFor(keyword) {
+  return categoryMappings.get(normalizeText(keyword))?.category || "";
 }
 
 function parseKeywordGroups(text) {

@@ -2,6 +2,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const MONTHLY_PREFIX = "monthly";
+const SETTINGS_PREFIX = "settings";
+const KEYWORD_CATEGORY_MAPPINGS_PATH = `${SETTINGS_PREFIX}/keyword-category-mappings.json`;
 
 export async function saveMonthlyReport(result, options = {}) {
   if (shouldUseBlob()) {
@@ -79,8 +81,84 @@ export async function listMonthlyReports(options = {}) {
   }
 }
 
+export async function getKeywordCategoryMappings(options = {}) {
+  if (shouldUseBlob()) {
+    const { list } = await import("@vercel/blob");
+    const result = await list({ prefix: KEYWORD_CATEGORY_MAPPINGS_PATH, limit: 1 });
+    const item = result.blobs.find((blob) => blob.pathname === KEYWORD_CATEGORY_MAPPINGS_PATH);
+    if (!item) return emptyKeywordCategoryMappings();
+
+    const response = await fetch(item.url);
+    return response.ok ? normalizeKeywordCategoryMappings(await response.json()) : emptyKeywordCategoryMappings();
+  }
+
+  try {
+    const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
+    const text = await readFile(join(outputDir, "keyword-category-mappings.json"), "utf8");
+    return normalizeKeywordCategoryMappings(JSON.parse(text));
+  } catch {
+    return emptyKeywordCategoryMappings();
+  }
+}
+
+export async function saveKeywordCategoryMappings(input, options = {}) {
+  const payload = normalizeKeywordCategoryMappings(input);
+  payload.updatedAt = new Date().toISOString();
+
+  if (shouldUseBlob()) {
+    const { put } = await import("@vercel/blob");
+    await put(KEYWORD_CATEGORY_MAPPINGS_PATH, JSON.stringify(payload, null, 2), {
+      access: "public",
+      allowOverwrite: true,
+      contentType: "application/json"
+    });
+    return payload;
+  }
+
+  if (process.env.VERCEL) {
+    return payload;
+  }
+
+  const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, "keyword-category-mappings.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return payload;
+}
+
 function shouldUseBlob() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function emptyKeywordCategoryMappings() {
+  return {
+    updatedAt: null,
+    mappings: []
+  };
+}
+
+function normalizeKeywordCategoryMappings(input = {}) {
+  const source = Array.isArray(input) ? input : input.mappings;
+  const byKeyword = new Map();
+
+  for (const item of source || []) {
+    const keyword = String(item.keyword || "").trim();
+    const category = String(item.category || "").trim();
+    if (!keyword || !category) continue;
+
+    byKeyword.set(normalizeMappingKey(keyword), {
+      keyword,
+      category
+    });
+  }
+
+  return {
+    updatedAt: input.updatedAt || null,
+    mappings: [...byKeyword.values()].sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"))
+  };
+}
+
+function normalizeMappingKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
 function isReportKey(value) {

@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentials, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { getMonthlyReport, listMonthlyReports } from "./storage.js";
+import { getKeywordCategoryMappings, getMonthlyReport, listMonthlyReports, saveKeywordCategoryMappings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
@@ -59,6 +59,20 @@ const server = createServer(async (request, response) => {
         outputDir: join(rootDir, "data", "monthly")
       });
       return report ? sendJson(response, 200, report) : sendJson(response, 404, { error: "Monthly report not found." });
+    }
+
+    if (url.pathname === "/api/keyword-category-mappings") {
+      const options = { outputDir: join(rootDir, "data", "settings") };
+      if (request.method === "GET") {
+        const mappings = await getKeywordCategoryMappings(options);
+        return sendJson(response, 200, mappings);
+      }
+
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const saved = await saveKeywordCategoryMappings(body, options);
+        return sendJson(response, 200, saved);
+      }
     }
 
     if (request.method === "GET") {

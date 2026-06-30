@@ -86,7 +86,7 @@ export async function fetchKeywordTrends(input, credentials = getNaverCredential
 
     if (response.ok) return body;
 
-    if (shouldRetryKeywordRequest(response.status) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
+    if (shouldRetryKeywordRequest(response.status, body) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
       await sleep(KEYWORD_RETRY_DELAYS_MS[attempt]);
       continue;
     }
@@ -198,7 +198,11 @@ async function throttleKeywordRequest() {
   lastKeywordRequestAt = Date.now();
 }
 
-function shouldRetryKeywordRequest(status) {
+function shouldRetryKeywordRequest(status, body) {
+  if (body?.errorCode === "010" && String(body.errorMessage || "").includes("Query limit exceeded")) {
+    return false;
+  }
+
   return status === 429 || status >= 500;
 }
 
