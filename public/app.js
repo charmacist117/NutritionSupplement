@@ -116,7 +116,7 @@ collectForm.addEventListener("submit", async (event) => {
     const report = await response.json();
 
     if (!response.ok) {
-      const details = report.details ? ` (${String(report.details).slice(0, 200)})` : "";
+      const details = formatErrorDetails(report.details);
       throw new Error(`${report.error || "수집에 실패했습니다."}${details}`);
     }
 
@@ -464,6 +464,20 @@ function setPreviousMonthDates() {
 
   startDateInput.value = formatDate(start);
   endDateInput.value = formatDate(end);
+}
+
+function formatErrorDetails(details) {
+  if (!details) return "";
+
+  if (typeof details === "string") {
+    return ` (${details.slice(0, 700)})`;
+  }
+
+  try {
+    return ` (${JSON.stringify(details).slice(0, 700)})`;
+  } catch {
+    return ` (${String(details).slice(0, 700)})`;
+  }
 }
 
 function formatDate(date) {

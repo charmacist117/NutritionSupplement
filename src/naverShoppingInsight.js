@@ -1,7 +1,10 @@
 const NAVER_OPEN_API_KEYWORDS_URL = "https://openapi.naver.com/v1/datalab/shopping/category/keywords";
 const NAVER_DATALAB_BASE_URL = "https://datalab.naver.com/shoppingInsight";
+const KEYWORD_REQUEST_DELAY_MS = Number(process.env.NAVER_KEYWORD_REQUEST_DELAY_MS || 350);
+const KEYWORD_RETRY_DELAYS_MS = [1500, 5000, 12000];
 
 const allowedTimeUnits = new Set(["date", "week", "month"]);
+let lastKeywordRequestAt = 0;
 
 export class NaverShoppingInsightError extends Error {
   constructor(message, status = 500, details = null) {
@@ -64,24 +67,44 @@ export async function fetchKeywordTrends(input, credentials = getNaverCredential
   assertNaverCredentials(credentials);
 
   const payload = buildKeywordPayload(input);
-  const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Naver-Client-Id": credentials.clientId,
-      "X-Naver-Client-Secret": credentials.clientSecret
-    },
-    body: JSON.stringify(payload)
-  });
 
-  const text = await response.text();
-  const body = parseJson(text);
+  for (let attempt = 0; attempt <= KEYWORD_RETRY_DELAYS_MS.length; attempt += 1) {
+    await throttleKeywordRequest();
 
-  if (!response.ok) {
-    throw new NaverShoppingInsightError("Naver Shopping Insight request failed.", response.status, body || text);
+    const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Naver-Client-Id": credentials.clientId,
+        "X-Naver-Client-Secret": credentials.clientSecret
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await response.text();
+    const body = parseJson(text);
+
+    if (response.ok) return body;
+
+    if (shouldRetryKeywordRequest(response.status) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
+      await sleep(KEYWORD_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+
+    throw new NaverShoppingInsightError(
+      `Naver Shopping Insight request failed. status=${response.status}`,
+      response.status,
+      {
+        response: body || text.slice(0, 700),
+        request: summarizeKeywordPayload(payload),
+        attempts: attempt + 1
+      }
+    );
   }
 
-  return body;
+  throw new NaverShoppingInsightError("Naver Shopping Insight request failed.", 500, {
+    request: summarizeKeywordPayload(payload)
+  });
 }
 
 export async function fetchPopularKeywordPage(input) {
@@ -154,6 +177,33 @@ function normalizeKeywords(value) {
   }
 
   return unique;
+}
+
+function summarizeKeywordPayload(payload) {
+  return {
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    timeUnit: payload.timeUnit,
+    category: payload.category,
+    keywords: payload.keyword.map((item) => item.name)
+  };
+}
+
+async function throttleKeywordRequest() {
+  if (!KEYWORD_REQUEST_DELAY_MS) return;
+
+  const now = Date.now();
+  const waitMs = Math.max(0, lastKeywordRequestAt + KEYWORD_REQUEST_DELAY_MS - now);
+  if (waitMs) await sleep(waitMs);
+  lastKeywordRequestAt = Date.now();
+}
+
+function shouldRetryKeywordRequest(status) {
+  return status === 429 || status >= 500;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseJson(text) {
