@@ -1,5 +1,7 @@
 const DATALAB_URL = "https://datalab.naver.com/shoppingInsight/sCategory.naver";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const RANK_PAGE_DELAY_MS = Number(process.env.NAVER_RANK_PAGE_DELAY_MS || 1800);
+const RANK_RETRY_DELAYS_MS = [7000, 15000, 30000];
 
 export async function fetchPopularKeywordsWithBrowser(input) {
   const browser = await launchBrowser();
@@ -14,9 +16,9 @@ export async function fetchPopularKeywordsWithBrowser(input) {
     await waitForNaverPage(page);
 
     try {
-      return await fetchPopularKeywordsFromVue(page, input);
-    } catch (vueError) {
-      return await fetchPopularKeywordsWithPageAjaxFallback(page, input, vueError);
+      return await fetchPopularKeywordsWithPageAjax(page, input);
+    } catch (ajaxError) {
+      return await fetchPopularKeywordsWithVueFallback(page, input, ajaxError);
     }
   } finally {
     await browser.close();
@@ -103,11 +105,11 @@ async function fetchPopularKeywordsFromVue(page, input) {
   return validatePopularKeywordRows(rows.slice(0, limit), limit);
 }
 
-async function fetchPopularKeywordsWithPageAjaxFallback(page, input, originalError) {
+async function fetchPopularKeywordsWithVueFallback(page, input, originalError) {
   try {
-    return await fetchPopularKeywordsWithPageAjax(page, input);
-  } catch (ajaxError) {
-    throw withCause(ajaxError, originalError);
+    return await fetchPopularKeywordsFromVue(page, input);
+  } catch (vueError) {
+    throw withCause(vueError, originalError);
   }
 }
 
@@ -117,68 +119,9 @@ async function fetchPopularKeywordsWithPageAjax(page, input) {
   const totalPages = Math.ceil(limit / 20);
 
   for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
-    const response = await page.evaluate((params) => {
-      const data = {
-        cid: params.category,
-        timeUnit: "date",
-        startDate: params.startDate,
-        endDate: params.endDate,
-        device: "",
-        gender: "",
-        age: "",
-        page: String(params.pageNo),
-        count: "20"
-      };
+    if (pageNo > 1) await sleep(RANK_PAGE_DELAY_MS);
 
-      const normalizeText = (value) => typeof value === "string" ? value : JSON.stringify(value);
-
-      if (window.jQuery?.ajax) {
-        return new Promise((resolve) => {
-          window.jQuery.ajax({
-            url: "getCategoryKeywordRank.naver",
-            method: "POST",
-            data,
-            dataType: "text",
-            timeout: 20000,
-            success: (text, _status, xhr) => resolve({
-              ok: true,
-              status: xhr?.status || 200,
-              contentType: xhr?.getResponseHeader?.("content-type") || "",
-              text: normalizeText(text)
-            }),
-            error: (xhr, statusText, errorText) => resolve({
-              ok: false,
-              status: xhr?.status || 0,
-              contentType: xhr?.getResponseHeader?.("content-type") || "",
-              text: normalizeText(xhr?.responseText || errorText || statusText || "")
-            })
-          });
-        });
-      }
-
-      return fetch("getCategoryKeywordRank.naver", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Accept": "application/json, text/javascript, */*; q=0.01",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        body: new URLSearchParams(data)
-      }).then(async (fetchResponse) => ({
-        ok: fetchResponse.ok,
-        status: fetchResponse.status,
-        contentType: fetchResponse.headers.get("content-type") || "",
-        text: await fetchResponse.text()
-      }));
-    }, {
-      category: String(input.category),
-      startDate: input.startDate,
-      endDate: input.endDate,
-      pageNo
-    });
-
-    const ranks = parseRankResponse(response, pageNo);
+    const ranks = await fetchPopularKeywordPageWithRetry(page, input, pageNo);
     rows.push(...ranks.map((item, index) => ({
       rank: (pageNo - 1) * 20 + index + 1,
       keyword: item.keyword
@@ -186,6 +129,90 @@ async function fetchPopularKeywordsWithPageAjax(page, input) {
   }
 
   return validatePopularKeywordRows(rows.slice(0, limit), limit);
+}
+
+async function fetchPopularKeywordPageWithRetry(page, input, pageNo) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= RANK_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) await sleep(RANK_RETRY_DELAYS_MS[attempt - 1]);
+
+    const response = await requestPopularKeywordPage(page, input, pageNo);
+
+    try {
+      return parseRankResponse(response, pageNo);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableRankError(error) || attempt === RANK_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function requestPopularKeywordPage(page, input, pageNo) {
+  return page.evaluate((params) => {
+    const data = {
+      cid: params.category,
+      timeUnit: "date",
+      startDate: params.startDate,
+      endDate: params.endDate,
+      device: "",
+      gender: "",
+      age: "",
+      page: String(params.pageNo),
+      count: "20"
+    };
+
+    const normalizeText = (value) => typeof value === "string" ? value : JSON.stringify(value);
+
+    if (window.jQuery?.ajax) {
+      return new Promise((resolve) => {
+        window.jQuery.ajax({
+          url: "getCategoryKeywordRank.naver",
+          method: "POST",
+          data,
+          dataType: "text",
+          timeout: 25000,
+          success: (text, _status, xhr) => resolve({
+            ok: true,
+            status: xhr?.status || 200,
+            contentType: xhr?.getResponseHeader?.("content-type") || "",
+            text: normalizeText(text)
+          }),
+          error: (xhr, statusText, errorText) => resolve({
+            ok: false,
+            status: xhr?.status || 0,
+            contentType: xhr?.getResponseHeader?.("content-type") || "",
+            text: normalizeText(xhr?.responseText || errorText || statusText || "")
+          })
+        });
+      });
+    }
+
+    return fetch("getCategoryKeywordRank.naver", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: new URLSearchParams(data)
+    }).then(async (fetchResponse) => ({
+      ok: fetchResponse.ok,
+      status: fetchResponse.status,
+      contentType: fetchResponse.headers.get("content-type") || "",
+      text: await fetchResponse.text()
+    }));
+  }, {
+    category: String(input.category),
+    startDate: input.startDate,
+    endDate: input.endDate,
+    pageNo
+  });
 }
 
 async function clickNextRankPage(page, expectedPage, previousFirstKeyword) {
@@ -295,7 +322,9 @@ function parseRankResponse(response, pageNo) {
 
   if (!response?.ok || !parsed?.ranks) {
     const snippet = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-    throw new Error(`Naver Top 500 page ${pageNo} response was not JSON. status=${response?.status || 0}, content-type=${response?.contentType || "unknown"}${snippet ? `, body=${snippet}` : ""}`);
+    const error = new Error(`Naver Top 500 page ${pageNo} response was not JSON. status=${response?.status || 0}, content-type=${response?.contentType || "unknown"}${snippet ? `, body=${snippet}` : ""}`);
+    error.status = response?.status || 0;
+    throw error;
   }
 
   if (!parsed.ranks.length) {
@@ -379,6 +408,14 @@ function tryJson(text) {
   } catch {
     return null;
   }
+}
+
+function isRetryableRankError(error) {
+  return error.status === 0 || error.status === 429 || error.status >= 500 || /status=(0|429|5\d\d)/.test(error.message);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function withCause(error, cause) {
