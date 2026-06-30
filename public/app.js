@@ -9,14 +9,20 @@ const collectButton = document.querySelector("#collect-button");
 const previousMonthButton = document.querySelector("#previous-month-button");
 const startDateInput = document.querySelector("#start-date");
 const endDateInput = document.querySelector("#end-date");
+const downloadButton = document.querySelector("#download-button");
 
 let selectedMonth = null;
+let currentReport = null;
 
 setPreviousMonthDates();
 
 previousMonthButton.addEventListener("click", () => {
   setPreviousMonthDates();
   statusText.textContent = "직전월 기간으로 설정했습니다.";
+});
+
+downloadButton.addEventListener("click", () => {
+  if (currentReport) downloadReportCsv(currentReport);
 });
 
 collectForm.addEventListener("submit", async (event) => {
@@ -36,7 +42,7 @@ collectForm.addEventListener("submit", async (event) => {
     const report = await response.json();
 
     if (!response.ok) {
-      const details = report.details ? ` (${String(report.details).slice(0, 160)})` : "";
+      const details = report.details ? ` (${String(report.details).slice(0, 200)})` : "";
       throw new Error(`${report.error || "수집에 실패했습니다."}${details}`);
     }
 
@@ -64,7 +70,7 @@ async function loadHealth() {
     const health = await response.json();
 
     if (!health.naverConfigured) {
-      statusText.textContent = "네이버 개발자센터에서 발급받은 Client ID / Secret을 Vercel 환경변수에 등록해야 합니다.";
+      statusText.textContent = "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 환경변수가 필요합니다.";
       collectButton.disabled = true;
       return;
     }
@@ -87,7 +93,7 @@ async function loadMonths(preferredMonth = null) {
   monthList.replaceChildren();
 
   if (!months.length) {
-    monthList.innerHTML = `<p class="empty">아직 저장된 월별 자료가 없습니다.</p>`;
+    monthList.innerHTML = `<p class="empty">아직 저장된 자료가 없습니다.</p>`;
     if (!collectButton.disabled) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
@@ -124,11 +130,13 @@ async function loadReport(month) {
 }
 
 function renderReport(report) {
+  currentReport = report;
   selectedMonth = report.month;
   updateMonthSelection();
+  downloadButton.disabled = false;
 
   reportTitle.textContent = `${report.month} 건강식품 Top ${report.count}`;
-  reportMeta.textContent = `${report.startDate} ~ ${report.endDate} / ${report.categoryPath.join(" > ")}`;
+  reportMeta.textContent = `${report.startDate} ~ ${report.endDate} / ${categoryPathText(report)}`;
   anchorKeyword.textContent = report.anchor?.keyword || "-";
 
   reportBody.replaceChildren();
@@ -142,6 +150,33 @@ function renderReport(report) {
     `;
     reportBody.append(tr);
   }
+}
+
+function downloadReportCsv(report) {
+  const rows = report.rows || [];
+  const categoryPath = categoryPathText(report);
+  const csvRows = [
+    ["순위", "검색어", "일일 점수 평균", "기준 키워드", "시작일", "종료일", "카테고리"],
+    ...rows.map((row) => [
+      row.rank,
+      row.keyword,
+      formatScore(row.dailyAverageRatio),
+      report.anchor?.keyword || "",
+      report.startDate || "",
+      report.endDate || "",
+      categoryPath
+    ])
+  ];
+  const csv = `\uFEFF${csvRows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeFileName(report.month || "naver-shopping-insight")}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function setPreviousMonthDates() {
@@ -179,4 +214,17 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#39;"
   }[char]));
+}
+
+function csvCell(value) {
+  const text = value == null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function categoryPathText(report) {
+  return Array.isArray(report.categoryPath) ? report.categoryPath.join(" > ") : "";
+}
+
+function safeFileName(value) {
+  return String(value).replace(/[^0-9A-Za-z._-]+/g, "_");
 }

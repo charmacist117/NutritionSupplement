@@ -31,7 +31,7 @@
 
       <section class="workspace">
         <aside class="month-panel">
-          <h2>월별 자료</h2>
+          <h2>저장 자료</h2>
           <div id="month-list" class="month-list"></div>
         </aside>
 
@@ -39,11 +39,14 @@
           <div class="report-header">
             <div>
               <h2 id="report-title">리포트 선택</h2>
-              <p id="report-meta">월을 선택하거나 날짜를 지정해 수집하면 Top 500 검색어와 평균 클릭량 점수가 표시됩니다.</p>
+              <p id="report-meta">저장 자료를 선택하거나 기간을 수집하면 Top 500 검색어와 평균 클릭 점수가 표시됩니다.</p>
             </div>
-            <div class="metric">
-              <span>기준 키워드</span>
-              <strong id="anchor-keyword">-</strong>
+            <div class="report-tools">
+              <button id="download-button" type="button" disabled>엑셀 다운로드</button>
+              <div class="metric">
+                <span>기준 키워드</span>
+                <strong id="anchor-keyword">-</strong>
+              </div>
             </div>
           </div>
 
@@ -58,7 +61,7 @@
               </thead>
               <tbody id="report-body">
                 <tr>
-                  <td colspan="3">저장된 월별 리포트가 없습니다.</td>
+                  <td colspan="3">선택된 리포트가 없습니다.</td>
                 </tr>
               </tbody>
             </table>
