@@ -180,12 +180,23 @@ button:disabled {
   gap: 8px;
 }
 
+.month-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 50px;
+  gap: 6px;
+  align-items: stretch;
+}
+
 .month-button {
   width: 100%;
+  min-height: 48px;
   background: #f8fafc;
   color: var(--ink);
   border: 1px solid var(--line);
+  padding: 7px 9px;
   text-align: left;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .month-button:hover,
@@ -193,6 +204,20 @@ button:disabled {
   background: var(--soft);
   border-color: var(--accent);
   color: var(--accent-strong);
+}
+
+.month-delete-button {
+  min-height: 48px;
+  padding: 0 8px;
+  background: #fff5f5;
+  color: #b42318;
+  border: 1px solid #ffd3cf;
+  font-size: 12px;
+}
+
+.month-delete-button:hover {
+  background: #ffe7e3;
+  color: #8f1b13;
 }
 
 .report-panel {

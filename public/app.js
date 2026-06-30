@@ -208,6 +208,9 @@ async function loadMonths(preferredMonth = null) {
 
   if (!months.length) {
     monthList.innerHTML = `<p class="empty">아직 저장된 자료가 없습니다.</p>`;
+    clearReportView();
+    await renderTrendDashboard();
+    if (activeTab() === "mapping") await renderMappingSheet();
     if (!collectButton.disabled && healthState.blobConfigured) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
@@ -215,16 +218,30 @@ async function loadMonths(preferredMonth = null) {
   }
 
   for (const month of months) {
+    const item = document.createElement("div");
+    item.className = "month-item";
+
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = periodLabel(month);
     button.dataset.reportKey = month;
     button.className = "month-button";
     button.addEventListener("click", () => loadReport(month));
-    monthList.append(button);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.textContent = "삭제";
+    deleteButton.className = "month-delete-button";
+    deleteButton.title = `${periodLabel(month)} 리포트 삭제`;
+    deleteButton.setAttribute("aria-label", `${periodLabel(month)} 리포트 삭제`);
+    deleteButton.addEventListener("click", () => deleteReport(month));
+
+    item.append(button, deleteButton);
+    monthList.append(item);
   }
 
-  await loadReport(preferredMonth || months[0]);
+  const nextMonth = preferredMonth && months.includes(preferredMonth) ? preferredMonth : months[0];
+  await loadReport(nextMonth);
   await renderTrendDashboard();
   if (activeTab() === "mapping") await renderMappingSheet();
 }
@@ -247,7 +264,7 @@ function activeTab() {
 
 async function loadReport(month) {
   selectedMonth = month;
-  statusText.textContent = `${month} 자료를 불러오는 중입니다.`;
+  statusText.textContent = `${periodLabel(month)} 자료를 불러오는 중입니다.`;
   updateMonthSelection();
 
   const report = await fetchReport(month);
@@ -258,7 +275,7 @@ async function loadReport(month) {
   }
 
   renderReport(report);
-  statusText.textContent = `${month} 자료를 표시 중입니다.`;
+  statusText.textContent = `${periodLabel(report)} 자료를 표시 중입니다.`;
 }
 
 function renderReport(report) {
@@ -283,6 +300,18 @@ function renderReport(report) {
     `;
     reportBody.append(tr);
   }
+}
+
+function clearReportView() {
+  currentReport = null;
+  selectedMonth = null;
+  updateMonthSelection();
+  saveReportButton.disabled = true;
+  downloadButton.disabled = true;
+  reportTitle.textContent = "리포트 선택";
+  reportMeta.textContent = "저장 자료를 선택하거나 기간을 수집하면 Top 500 검색어와 평균 클릭 점수가 표시됩니다.";
+  anchorKeyword.textContent = "-";
+  reportBody.innerHTML = `<tr><td colspan="3">선택된 리포트가 없습니다.</td></tr>`;
 }
 
 async function saveCurrentReport() {
@@ -311,6 +340,53 @@ async function saveCurrentReport() {
     statusText.textContent = error.message;
   } finally {
     saveReportButton.disabled = false;
+  }
+}
+
+async function deleteReport(month) {
+  const label = periodLabel(month);
+  const confirmed = window.confirm(`${label} 리포트를 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`);
+  if (!confirmed) return;
+
+  setMonthListDisabled(true);
+  statusText.textContent = `${label} 리포트를 삭제하는 중입니다.`;
+
+  try {
+    const response = await fetch(`/api/monthly-report?month=${encodeURIComponent(month)}`, {
+      method: "DELETE"
+    });
+    const result = await readJsonResponse(response);
+
+    if (!response.ok) {
+      throw new Error(result.error || storageErrorMessage(result.storage) || "리포트 삭제에 실패했습니다.");
+    }
+
+    reportCache.delete(month);
+    const remainingMonths = reportKeys.filter((key) => key !== month);
+    const nextMonth = selectedMonth === month ? remainingMonths[0] || null : selectedMonth;
+
+    if (currentReport?.month === month) clearReportView();
+
+    await loadMonths(nextMonth);
+    if (activeTab() === "mapping") await renderMappingSheet({ refreshReports: true });
+    statusText.textContent = `${label} 리포트를 삭제했습니다.`;
+  } catch (error) {
+    statusText.textContent = error.message;
+    setMonthListDisabled(false);
+  }
+}
+
+async function readJsonResponse(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function setMonthListDisabled(disabled) {
+  for (const button of monthList.querySelectorAll("button")) {
+    button.disabled = disabled;
   }
 }
 
@@ -885,7 +961,16 @@ function periodLabel(reportOrKey) {
   const key = String(reportOrKey || "");
   const range = key.match(/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/);
   if (range) return `${range[1]} ~ ${range[2]}`;
+
+  const month = key.match(/^(\d{4})-(\d{2})$/);
+  if (month) return `${key}-01 ~ ${lastDayOfMonth(key)}`;
+
   return key;
+}
+
+function lastDayOfMonth(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return formatDate(new Date(year, month, 0));
 }
 
 function roundScore(value) {

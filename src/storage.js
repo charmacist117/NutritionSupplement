@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const MONTHLY_PREFIX = "monthly";
@@ -57,6 +57,40 @@ export async function getMonthlyReport(month, options = {}) {
   } catch {
     return null;
   }
+}
+
+export async function deleteMonthlyReport(month, options = {}) {
+  if (!isReportKey(month)) {
+    throw new Error("report key must use YYYY-MM or YYYY-MM-DD_YYYY-MM-DD format.");
+  }
+
+  const paths = [
+    `${MONTHLY_PREFIX}/${month}.json`,
+    `${MONTHLY_PREFIX}/${month}.csv`
+  ];
+
+  if (shouldUseBlob()) {
+    const { del } = await import("@vercel/blob");
+    await del(paths);
+    return { deleted: true, storage: "blob", key: month };
+  }
+
+  if (process.env.VERCEL) {
+    return {
+      deleted: false,
+      storage: "none",
+      key: month,
+      reason: "Blob credentials are not configured."
+    };
+  }
+
+  const outputDir = options.outputDir || join(process.cwd(), "data", "monthly");
+  await Promise.all([
+    unlinkIfExists(join(outputDir, `${month}.json`)),
+    unlinkIfExists(join(outputDir, `${month}.csv`))
+  ]);
+
+  return { deleted: true, storage: "file", key: month };
 }
 
 export async function listMonthlyReports(options = {}) {
@@ -138,6 +172,14 @@ async function getBlobText(pathname) {
   if (result?.statusCode !== 200 || !result.stream) return null;
 
   return new Response(result.stream).text();
+}
+
+async function unlinkIfExists(path) {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
 }
 
 function emptyKeywordCategoryMappings() {
