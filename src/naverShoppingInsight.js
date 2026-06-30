@@ -86,6 +86,18 @@ export async function fetchKeywordTrends(input, credentials = getNaverCredential
 
     if (response.ok) return body;
 
+    if (isKeywordQuotaExceeded(body)) {
+      throw new NaverShoppingInsightError(
+        "네이버 Open API 일일 호출 한도를 모두 사용했습니다. 한도 초기화 후 다시 수집해주세요.",
+        response.status,
+        {
+          response: body,
+          request: summarizeKeywordPayload(payload),
+          attempts: attempt + 1
+        }
+      );
+    }
+
     if (shouldRetryKeywordRequest(response.status, body) && attempt < KEYWORD_RETRY_DELAYS_MS.length) {
       await sleep(KEYWORD_RETRY_DELAYS_MS[attempt]);
       continue;
@@ -199,11 +211,15 @@ async function throttleKeywordRequest() {
 }
 
 function shouldRetryKeywordRequest(status, body) {
-  if (body?.errorCode === "010" && String(body.errorMessage || "").includes("Query limit exceeded")) {
+  if (isKeywordQuotaExceeded(body)) {
     return false;
   }
 
   return status === 429 || status >= 500;
+}
+
+function isKeywordQuotaExceeded(body) {
+  return body?.errorCode === "010" && String(body.errorMessage || "").includes("Query limit exceeded");
 }
 
 function sleep(ms) {

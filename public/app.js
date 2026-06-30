@@ -141,8 +141,7 @@ collectForm.addEventListener("submit", async (event) => {
     const report = await response.json();
 
     if (!response.ok) {
-      const details = formatErrorDetails(report.details);
-      throw new Error(`${report.error || "수집에 실패했습니다."}${details}`);
+      throw new Error(formatCollectionError(report));
     }
 
     statusText.textContent = `${report.startDate} ~ ${report.endDate} 수집이 완료되었습니다.`;
@@ -719,6 +718,26 @@ function formatErrorDetails(details) {
   } catch {
     return ` (${String(details).slice(0, 700)})`;
   }
+}
+
+function formatCollectionError(report) {
+  const quota = quotaExceededSummary(report.details);
+  if (quota) {
+    return `${report.error || "네이버 Open API 일일 호출 한도를 모두 사용했습니다."} (${quota})`;
+  }
+
+  const details = formatErrorDetails(report.details);
+  return `${report.error || "수집에 실패했습니다."}${details}`;
+}
+
+function quotaExceededSummary(details) {
+  const response = details?.response;
+  if (response?.errorCode !== "010" || !String(response.errorMessage || "").includes("Query limit exceeded")) {
+    return "";
+  }
+
+  const quota = String(response.errorMessage || "").match(/count\/quota=([^}]+)/)?.[1];
+  return quota ? `사용량 ${quota}` : "일일 한도 초과";
 }
 
 function formatDate(date) {
