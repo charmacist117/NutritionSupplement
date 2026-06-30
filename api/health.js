@@ -1,5 +1,6 @@
 import { HEALTH_FOOD_CATEGORY } from "../src/categories.js";
 import { getNaverCredentialCount } from "../src/naverShoppingInsight.js";
+import { hasBlobCredentials } from "../src/storage.js";
 
 export default async function handler(request, response) {
   if (request.method !== "GET") {
@@ -12,7 +13,7 @@ export default async function handler(request, response) {
     ok: true,
     naverConfigured: naverCredentialCount > 0,
     naverCredentialCount,
-    blobConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+    blobConfigured: hasBlobCredentials(),
     category: HEALTH_FOOD_CATEGORY
   });
 }

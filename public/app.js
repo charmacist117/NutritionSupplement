@@ -85,6 +85,10 @@ let reportKeys = [];
 let reportCache = new Map();
 let categoryMappings = new Map();
 let mappingRows = [];
+let healthState = {
+  naverConfigured: false,
+  blobConfigured: false
+};
 
 setPreviousMonthDates();
 keywordGroupsInput.value = localStorage.getItem("keywordGroups") || DEFAULT_KEYWORD_GROUPS.join("\n");
@@ -175,6 +179,7 @@ async function loadHealth() {
     if (!response.ok) return;
 
     const health = await response.json();
+    healthState = health;
 
     if (!health.naverConfigured) {
       statusText.textContent = "네이버 Open API 환경변수가 필요합니다. NAVER_CLIENT_ID_1 / NAVER_CLIENT_SECRET_1부터 설정해주세요.";
@@ -183,7 +188,7 @@ async function loadHealth() {
     }
 
     if (!health.blobConfigured) {
-      statusText.textContent = "Vercel Blob이 연결되지 않았습니다. 수집 결과는 표시되지만 저장되지 않을 수 있습니다.";
+      statusText.textContent = "현재 배포에서 Blob 인증 정보를 찾지 못했습니다. Vercel Blob 연결 후 다시 배포해야 저장됩니다.";
       return;
     }
 
@@ -203,7 +208,7 @@ async function loadMonths(preferredMonth = null) {
 
   if (!months.length) {
     monthList.innerHTML = `<p class="empty">아직 저장된 자료가 없습니다.</p>`;
-    if (!collectButton.disabled) {
+    if (!collectButton.disabled && healthState.blobConfigured) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
     return;
@@ -293,7 +298,7 @@ async function saveCurrentReport() {
     const result = await response.json();
 
     if (!response.ok) {
-      throw new Error(result.error || "리포트 저장에 실패했습니다.");
+      throw new Error(result.error || storageErrorMessage(result.storage) || "리포트 저장에 실패했습니다.");
     }
 
     currentReport.saved = true;
@@ -307,6 +312,14 @@ async function saveCurrentReport() {
   } finally {
     saveReportButton.disabled = false;
   }
+}
+
+function storageErrorMessage(storage) {
+  if (storage?.reason === "Blob credentials are not configured.") {
+    return "현재 배포에서 Blob 인증 정보를 찾지 못했습니다. Blob Store 연결 후 Vercel에서 다시 배포해주세요.";
+  }
+
+  return "";
 }
 
 async function downloadReportXlsx(report) {

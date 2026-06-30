@@ -11,7 +11,7 @@ export default async function handler(request, response) {
       if (!result.saved) {
         return response.status(503).json({
           ok: false,
-          error: "Blob 저장소가 연결되지 않아 리포트를 저장할 수 없습니다.",
+          error: "현재 배포에서 Blob 인증 정보를 찾지 못했습니다. Blob Store 연결 후 Vercel에서 다시 배포해주세요.",
           storage: result
         });
       }

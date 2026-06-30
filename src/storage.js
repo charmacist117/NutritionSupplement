@@ -4,6 +4,7 @@ import { join } from "node:path";
 const MONTHLY_PREFIX = "monthly";
 const SETTINGS_PREFIX = "settings";
 const KEYWORD_CATEGORY_MAPPINGS_PATH = `${SETTINGS_PREFIX}/keyword-category-mappings.json`;
+const BLOB_ACCESS = "private";
 
 export async function saveMonthlyReport(result, options = {}) {
   const report = normalizeMonthlyReport(result);
@@ -11,16 +12,16 @@ export async function saveMonthlyReport(result, options = {}) {
   if (shouldUseBlob()) {
     const { put } = await import("@vercel/blob");
     await put(`${MONTHLY_PREFIX}/${report.month}.json`, JSON.stringify(report, null, 2), {
-      access: "public",
+      access: BLOB_ACCESS,
       allowOverwrite: true,
       contentType: "application/json"
     });
     await put(`${MONTHLY_PREFIX}/${report.month}.csv`, toCsv(report.rows), {
-      access: "public",
+      access: BLOB_ACCESS,
       allowOverwrite: true,
       contentType: "text/csv; charset=utf-8"
     });
-    return { saved: true, storage: "blob", key: report.month };
+    return { saved: true, storage: "blob", access: BLOB_ACCESS, key: report.month };
   }
 
   if (process.env.VERCEL) {
@@ -28,7 +29,7 @@ export async function saveMonthlyReport(result, options = {}) {
       saved: false,
       storage: "none",
       key: report.month,
-      reason: "BLOB_READ_WRITE_TOKEN is not configured."
+      reason: "Blob credentials are not configured."
     };
   }
 
@@ -45,13 +46,8 @@ export async function getMonthlyReport(month, options = {}) {
   }
 
   if (shouldUseBlob()) {
-    const { list } = await import("@vercel/blob");
-    const result = await list({ prefix: `${MONTHLY_PREFIX}/${month}.json`, limit: 1 });
-    const item = result.blobs.find((blob) => blob.pathname === `${MONTHLY_PREFIX}/${month}.json`);
-    if (!item) return null;
-
-    const response = await fetch(item.url);
-    return response.ok ? response.json() : null;
+    const text = await getBlobText(`${MONTHLY_PREFIX}/${month}.json`);
+    return text ? JSON.parse(text) : null;
   }
 
   try {
@@ -91,13 +87,8 @@ export async function listMonthlyReports(options = {}) {
 
 export async function getKeywordCategoryMappings(options = {}) {
   if (shouldUseBlob()) {
-    const { list } = await import("@vercel/blob");
-    const result = await list({ prefix: KEYWORD_CATEGORY_MAPPINGS_PATH, limit: 1 });
-    const item = result.blobs.find((blob) => blob.pathname === KEYWORD_CATEGORY_MAPPINGS_PATH);
-    if (!item) return emptyKeywordCategoryMappings();
-
-    const response = await fetch(item.url);
-    return response.ok ? normalizeKeywordCategoryMappings(await response.json()) : emptyKeywordCategoryMappings();
+    const text = await getBlobText(KEYWORD_CATEGORY_MAPPINGS_PATH);
+    return text ? normalizeKeywordCategoryMappings(JSON.parse(text)) : emptyKeywordCategoryMappings();
   }
 
   try {
@@ -116,7 +107,7 @@ export async function saveKeywordCategoryMappings(input, options = {}) {
   if (shouldUseBlob()) {
     const { put } = await import("@vercel/blob");
     await put(KEYWORD_CATEGORY_MAPPINGS_PATH, JSON.stringify(payload, null, 2), {
-      access: "public",
+      access: BLOB_ACCESS,
       allowOverwrite: true,
       contentType: "application/json"
     });
@@ -134,7 +125,19 @@ export async function saveKeywordCategoryMappings(input, options = {}) {
 }
 
 function shouldUseBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return hasBlobCredentials();
+}
+
+export function hasBlobCredentials(env = process.env) {
+  return Boolean(env.BLOB_READ_WRITE_TOKEN || (env.BLOB_STORE_ID && env.VERCEL_OIDC_TOKEN));
+}
+
+async function getBlobText(pathname) {
+  const { get } = await import("@vercel/blob");
+  const result = await get(pathname, { access: BLOB_ACCESS });
+  if (result?.statusCode !== 200 || !result.stream) return null;
+
+  return new Response(result.stream).text();
 }
 
 function emptyKeywordCategoryMappings() {

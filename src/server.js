@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentialCount, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { getKeywordCategoryMappings, getMonthlyReport, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport } from "./storage.js";
+import { getKeywordCategoryMappings, getMonthlyReport, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
@@ -25,7 +25,7 @@ const server = createServer(async (request, response) => {
         ok: true,
         naverConfigured: naverCredentialCount > 0,
         naverCredentialCount,
-        blobConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+        blobConfigured: hasBlobCredentials(),
         category: HEALTH_FOOD_CATEGORY
       });
     }
@@ -68,7 +68,7 @@ const server = createServer(async (request, response) => {
         const storage = await saveMonthlyReport(body, options);
         return storage.saved
           ? sendJson(response, 200, { ok: true, storage })
-          : sendJson(response, 503, { ok: false, error: "Blob 저장소가 연결되지 않아 리포트를 저장할 수 없습니다.", storage });
+          : sendJson(response, 503, { ok: false, error: "현재 배포에서 Blob 인증 정보를 찾지 못했습니다. Blob Store 연결 후 Vercel에서 다시 배포해주세요.", storage });
       }
     }
 
