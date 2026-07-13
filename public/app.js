@@ -941,7 +941,7 @@ function renderTrendTable(months, matrix) {
   `;
   trendBody.replaceChildren();
 
-  for (const row of matrix.sort((a, b) => b.latestScore - a.latestScore)) {
+  for (const row of [...matrix].sort((a, b) => b.latestScore - a.latestScore)) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(row.label)}</td>
@@ -961,9 +961,22 @@ function renderTrendChart(months, matrix) {
   const padding = { top: 18, right: 20, bottom: 44, left: 56 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const topSeries = [...matrix].sort((a, b) => b.latestScore - a.latestScore).slice(0, 6);
-  const maxScore = Math.max(1, ...topSeries.flatMap((group) => group.points.map((point) => point.score)));
-  const colors = ["#168246", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2"];
+  const series = [...matrix];
+  const maxScore = Math.max(1, ...series.flatMap((group) => group.points.map((point) => point.score)));
+  const colors = [
+    "#168246",
+    "#2563eb",
+    "#d97706",
+    "#dc2626",
+    "#7c3aed",
+    "#0891b2",
+    "#be123c",
+    "#4d7c0f",
+    "#9333ea",
+    "#0f766e",
+    "#c2410c",
+    "#475569"
+  ];
   const x = (index) => padding.left + (months.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (months.length - 1));
   const y = (score) => padding.top + chartHeight - (chartHeight * score) / maxScore;
 
@@ -972,7 +985,7 @@ function renderTrendChart(months, matrix) {
     <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" class="axis"></line>
     <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" class="axis"></line>
     ${months.map((month, index) => `<text x="${x(index)}" y="${height - 18}" text-anchor="middle" class="axis-label">${escapeHtml(shortMonth(month))}</text>`).join("")}
-    ${topSeries.map((group, groupIndex) => {
+    ${series.map((group, groupIndex) => {
       const path = group.points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.score)}`).join(" ");
       const color = colors[groupIndex % colors.length];
       return `
