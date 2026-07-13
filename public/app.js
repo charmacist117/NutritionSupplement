@@ -957,11 +957,13 @@ function renderTrendTable(months, matrix) {
 
 function renderTrendChart(months, matrix) {
   const width = 920;
-  const height = 280;
-  const padding = { top: 18, right: 20, bottom: 44, left: 56 };
+  const series = [...matrix];
+  const height = Math.max(320, 104 + series.length * 18);
+  const padding = { top: 18, right: 172, bottom: 58, left: 56 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const series = [...matrix];
+  const legendX = width - padding.right + 24;
+  const legendY = padding.top + 12;
   const maxScore = Math.max(1, ...series.flatMap((group) => group.points.map((point) => point.score)));
   const colors = [
     "#168246",
@@ -981,20 +983,63 @@ function renderTrendChart(months, matrix) {
   const y = (score) => padding.top + chartHeight - (chartHeight * score) / maxScore;
 
   trendChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  trendChart.style.height = `${height}px`;
+  trendChart.style.minHeight = `${height}px`;
   trendChart.innerHTML = `
     <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" class="axis"></line>
     <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" class="axis"></line>
-    ${months.map((month, index) => `<text x="${x(index)}" y="${height - 18}" text-anchor="middle" class="axis-label">${escapeHtml(shortMonth(month))}</text>`).join("")}
+    <line x1="${padding.left + chartWidth + 14}" y1="${padding.top}" x2="${padding.left + chartWidth + 14}" y2="${padding.top + chartHeight}" class="axis"></line>
+    ${months.map((month, index) => {
+      const [line1, line2] = periodAxisLabelParts(month);
+      return `
+        <text x="${x(index)}" y="${height - 34}" text-anchor="middle" class="axis-label">
+          <tspan x="${x(index)}" dy="0">${escapeHtml(line1)}</tspan>
+          ${line2 ? `<tspan x="${x(index)}" dy="13">${escapeHtml(line2)}</tspan>` : ""}
+        </text>
+      `;
+    }).join("")}
     ${series.map((group, groupIndex) => {
       const path = group.points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.score)}`).join(" ");
       const color = colors[groupIndex % colors.length];
       return `
         <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"></path>
         ${group.points.map((point, index) => `<circle cx="${x(index)}" cy="${y(point.score)}" r="3.5" fill="${color}"></circle>`).join("")}
-        <text x="${padding.left + 8}" y="${padding.top + 16 + groupIndex * 18}" class="legend" fill="${color}">${escapeHtml(group.label)}</text>
+      `;
+    }).join("")}
+    ${series.map((group, groupIndex) => {
+      const color = colors[groupIndex % colors.length];
+      const yOffset = legendY + groupIndex * 18;
+      return `
+        <g transform="translate(${legendX}, ${yOffset})">
+          <line x1="0" y1="0" x2="12" y2="0" stroke="${color}" stroke-width="2.5"></line>
+          <circle cx="6" cy="0" r="3" fill="${color}"></circle>
+          <text x="18" y="4" class="legend" fill="${color}">${escapeHtml(group.label)}</text>
+        </g>
       `;
     }).join("")}
   `;
+}
+
+function periodAxisLabelParts(value) {
+  const text = String(value || "");
+  const range = text.match(/(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})/);
+  if (range) return [shortPeriodDate(range[1]), `~ ${shortPeriodDate(range[2])}`];
+
+  const keyRange = text.match(/(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})/);
+  if (keyRange) return [shortPeriodDate(keyRange[1]), `~ ${shortPeriodDate(keyRange[2])}`];
+
+  return [shortPeriodDate(text), ""];
+}
+
+function shortPeriodDate(value) {
+  const text = String(value || "");
+  const date = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (date) return `${date[1].slice(2)}-${date[2]}-${date[3]}`;
+
+  const month = text.match(/^(\d{4})-(\d{2})$/);
+  if (month) return `${month[1].slice(2)}-${month[2]}`;
+
+  return text.length > 12 ? text.slice(0, 12) : text;
 }
 
 function setPreviousMonthDates() {
