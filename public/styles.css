@@ -33,7 +33,8 @@ body {
 .report-panel,
 .trend-panel,
 .mapping-panel,
-.comparison-panel {
+.comparison-panel,
+.new-keywords-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -142,12 +143,14 @@ button:disabled {
 }
 
 .tab-button {
+  flex: 0 0 auto;
   min-height: 42px;
   background: transparent;
   color: var(--muted);
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 6px 6px 0 0;
+  white-space: nowrap;
 }
 
 .tab-button:hover,
@@ -299,6 +302,7 @@ button:disabled {
 .trend-header,
 .mapping-header,
 .comparison-header,
+.new-keywords-header,
 .section-heading {
   display: flex;
   align-items: start;
@@ -309,6 +313,7 @@ button:disabled {
 .trend-header p,
 .mapping-header p,
 .comparison-header p,
+.new-keywords-header p,
 .section-heading p {
   margin-top: 8px;
   color: var(--muted);
@@ -366,6 +371,40 @@ button:disabled {
   width: 100%;
   min-width: 0;
   padding: 20px;
+}
+
+.comparison-header-controls {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.comparison-mode {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.comparison-mode-button {
+  min-height: 36px;
+  border-radius: 0;
+  border-right: 1px solid var(--line);
+  padding: 0 12px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.comparison-mode-button:last-child {
+  border-right: 0;
+}
+
+.comparison-mode-button:hover,
+.comparison-mode-button.active {
+  background: var(--soft);
+  color: var(--accent-strong);
 }
 
 .comparison-actions {
@@ -661,6 +700,91 @@ button:disabled {
   color: #b42318;
 }
 
+.new-keywords-panel {
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+}
+
+.new-keywords-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.new-keywords-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.new-keywords-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 170px minmax(260px, 1.5fr);
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+}
+
+.new-keywords-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.new-keywords-toolbar input,
+.new-keywords-toolbar select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+
+#new-keywords-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.new-keywords-table-wrap {
+  max-height: 680px;
+}
+
+.new-keywords-table-wrap td:first-child {
+  width: auto;
+  color: var(--ink);
+}
+
+.new-keywords-table-wrap td:last-child {
+  width: 280px;
+}
+
+.category-suggestion,
+.new-keyword-badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #44515e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.new-keyword-badge.first {
+  background: #eaf7ef;
+  color: #08783f;
+}
+
+.new-keyword-badge.returning {
+  background: #fff7e8;
+  color: #8a4b08;
+}
+
 .mapping-actions {
   display: flex;
   gap: 10px;
@@ -765,14 +889,30 @@ td:last-child {
   .trend-header,
   .mapping-header,
   .comparison-header,
+  .new-keywords-header,
   .section-heading {
     display: grid;
   }
 
   .report-tools,
   .mapping-actions,
-  .comparison-actions {
+  .comparison-actions,
+  .new-keywords-actions {
     display: grid;
+  }
+
+  .comparison-header-controls {
+    justify-items: stretch;
+  }
+
+  .comparison-mode {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .comparison-mode-button {
+    min-width: 0;
+    padding: 0 7px;
   }
 
   .collect-form {
@@ -787,9 +927,14 @@ td:last-child {
     grid-template-columns: 1fr;
   }
 
+  .new-keywords-toolbar {
+    grid-template-columns: 1fr;
+  }
+
   .comparison-summary,
   .comparison-insights,
   .latest-change-summary,
+  .new-keywords-summary,
   .comparison-filters {
     grid-template-columns: minmax(0, 1fr);
   }

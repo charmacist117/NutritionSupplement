@@ -26,7 +26,9 @@ const mappingStatus = document.querySelector("#mapping-status");
 const mappingBody = document.querySelector("#mapping-body");
 const comparisonSelectAllButton = document.querySelector("#comparison-select-all");
 const comparisonClearButton = document.querySelector("#comparison-clear");
+const comparisonEmailCopyButton = document.querySelector("#comparison-email-copy");
 const comparisonDownloadButton = document.querySelector("#comparison-download");
+const comparisonModeButtons = [...document.querySelectorAll("[data-comparison-mode]")];
 const comparisonPeriodList = document.querySelector("#comparison-period-list");
 const comparisonStatus = document.querySelector("#comparison-status");
 const comparisonSummary = document.querySelector("#comparison-summary");
@@ -42,6 +44,15 @@ const comparisonKeywordFilter = document.querySelector("#comparison-keyword-filt
 const comparisonKeywordStatus = document.querySelector("#comparison-keyword-status");
 const comparisonKeywordHead = document.querySelector("#comparison-keyword-head");
 const comparisonKeywordBody = document.querySelector("#comparison-keyword-body");
+const newKeywordsPeriod = document.querySelector("#new-keywords-period");
+const newKeywordsRefreshButton = document.querySelector("#new-keywords-refresh");
+const newKeywordsApplySuggestionsButton = document.querySelector("#new-keywords-apply-suggestions");
+const newKeywordsSaveButton = document.querySelector("#new-keywords-save");
+const newKeywordsSummary = document.querySelector("#new-keywords-summary");
+const newKeywordsSearch = document.querySelector("#new-keywords-search");
+const newKeywordsFilter = document.querySelector("#new-keywords-filter");
+const newKeywordsStatus = document.querySelector("#new-keywords-status");
+const newKeywordsBody = document.querySelector("#new-keywords-body");
 const PRODUCT_GROUPS = [
   "총합계",
   "오메가3",
@@ -99,7 +110,15 @@ const DEFAULT_KEYWORD_GROUPS = [
 ];
 const REPORT_ORDER_STORAGE_KEY = "reportOrder";
 const COMPARISON_SELECTION_STORAGE_KEY = "comparisonReportSelection";
+const COMPARISON_MODE_STORAGE_KEY = "comparisonMode";
 const LATEST_RANK_CHANGE_THRESHOLD = 50;
+const MISSING_MONTH_RANK = 501;
+const COMPARISON_MODES = {
+  month: { label: "월별", monthCount: 1 },
+  quarter: { label: "분기별", monthCount: 3 },
+  half: { label: "반기별", monthCount: 6 },
+  year: { label: "연간", monthCount: 12 }
+};
 
 let selectedMonth = null;
 let currentReport = null;
@@ -114,6 +133,8 @@ let comparisonReports = [];
 let comparisonCategoryRows = [];
 let comparisonKeywordRows = [];
 let comparisonLatestChanges = [];
+let comparisonMode = readComparisonMode();
+let newKeywordRows = [];
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -121,6 +142,7 @@ let healthState = {
 
 setPreviousMonthDates();
 keywordGroupsInput.value = localStorage.getItem("keywordGroups") || DEFAULT_KEYWORD_GROUPS.join("\n");
+updateComparisonModeButtons();
 
 for (const button of tabButtons) {
   button.addEventListener("click", () => setActiveTab(button.dataset.tab));
@@ -189,6 +211,28 @@ comparisonKeywordSearch.addEventListener("input", () => renderComparisonKeywordR
 comparisonKeywordFilter.addEventListener("change", () => renderComparisonKeywordRows());
 
 comparisonDownloadButton.addEventListener("click", () => downloadComparisonXlsx());
+comparisonEmailCopyButton.addEventListener("click", () => copyComparisonEmail());
+
+for (const button of comparisonModeButtons) {
+  button.addEventListener("click", async () => {
+    const nextMode = button.dataset.comparisonMode;
+    if (!COMPARISON_MODES[nextMode] || nextMode === comparisonMode) return;
+
+    comparisonMode = nextMode;
+    localStorage.setItem(COMPARISON_MODE_STORAGE_KEY, comparisonMode);
+    updateComparisonModeButtons();
+    await renderComparisonSheet();
+  });
+}
+
+newKeywordsRefreshButton.addEventListener("click", async () => {
+  await renderNewKeywordsSheet({ refreshReports: true });
+});
+
+newKeywordsApplySuggestionsButton.addEventListener("click", () => applyNewKeywordSuggestions());
+newKeywordsSaveButton.addEventListener("click", () => saveNewKeywordMappings());
+newKeywordsSearch.addEventListener("input", () => renderNewKeywordRows());
+newKeywordsFilter.addEventListener("change", () => renderNewKeywordRows());
 
 collectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -268,6 +312,7 @@ async function loadMonths(preferredMonth = null) {
     await renderTrendDashboard();
     if (activeTab() === "mapping") await renderMappingSheet();
     if (activeTab() === "comparison") await renderComparisonSheet();
+    if (activeTab() === "new-keywords") await renderNewKeywordsSheet();
     if (!collectButton.disabled && healthState.blobConfigured) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
@@ -281,6 +326,7 @@ async function loadMonths(preferredMonth = null) {
   await renderTrendDashboard();
   if (activeTab() === "mapping") await renderMappingSheet();
   if (activeTab() === "comparison") await renderComparisonSheet();
+  if (activeTab() === "new-keywords") await renderNewKeywordsSheet();
 }
 
 function renderMonthList() {
@@ -331,6 +377,7 @@ async function setActiveTab(tab) {
 
   if (tab === "mapping") await renderMappingSheet();
   if (tab === "comparison") await renderComparisonSheet();
+  if (tab === "new-keywords") await renderNewKeywordsSheet();
 }
 
 function activeTab() {
@@ -802,7 +849,7 @@ function renderMappingRows() {
   mappingBody.append(fragment);
 }
 
-function createCategorySelect(keyword) {
+function createCategorySelect(keyword, onChange = null) {
   const select = document.createElement("select");
   select.className = "category-select";
   select.dataset.keyword = keyword;
@@ -822,6 +869,11 @@ function createCategorySelect(keyword) {
   select.value = manualCategoryFor(keyword);
   select.addEventListener("change", () => {
     updateCategoryMapping(keyword, select.value);
+    if (onChange) {
+      onChange(select.value);
+      return;
+    }
+
     const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
     mappingStatus.textContent = `총 ${mappingRows.length}개 · 매칭 완료 ${mappedCount}개 · 저장 필요`;
   });
@@ -849,21 +901,7 @@ async function saveCategoryMappingsFromSheet() {
   mappingStatus.textContent = "카테고리 매칭을 저장하는 중입니다.";
 
   try {
-    const mappings = [...categoryMappings.values()]
-      .filter((item) => item.keyword && item.category)
-      .sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"));
-    const response = await fetch("/api/keyword-category-mappings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mappings })
-    });
-    const saved = await response.json();
-
-    if (!response.ok) {
-      throw new Error(saved.error || "카테고리 매칭 저장에 실패했습니다.");
-    }
-
-    setCategoryMappings(saved);
+    const saved = await persistCategoryMappings();
     renderMappingRows();
     mappingStatus.textContent = `${saved.mappings.length}개 키워드 매칭을 저장했습니다.`;
   } catch (error) {
@@ -871,6 +909,25 @@ async function saveCategoryMappingsFromSheet() {
   } finally {
     mappingSaveButton.disabled = false;
   }
+}
+
+async function persistCategoryMappings() {
+  const mappings = [...categoryMappings.values()]
+    .filter((item) => item.keyword && item.category)
+    .sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"));
+  const response = await fetch("/api/keyword-category-mappings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mappings })
+  });
+  const saved = await response.json();
+
+  if (!response.ok) {
+    throw new Error(saved.error || "카테고리 매칭 저장에 실패했습니다.");
+  }
+
+  setCategoryMappings(saved);
+  return saved;
 }
 
 function manualCategoryFor(keyword) {
@@ -959,26 +1016,199 @@ function scoreByProductGroup(rows) {
   return scores;
 }
 
+async function renderNewKeywordsSheet(options = {}) {
+  newKeywordsRefreshButton.disabled = true;
+  newKeywordsApplySuggestionsButton.disabled = true;
+  newKeywordsSaveButton.disabled = true;
+
+  try {
+    if (options.refreshReports) reportCache = new Map();
+    const reports = await loadAllReports();
+
+    if (reports.length < 2) {
+      newKeywordRows = [];
+      newKeywordsPeriod.textContent = "최신 자료와 비교할 바로 이전 저장 자료가 필요합니다.";
+      newKeywordsSummary.replaceChildren();
+      newKeywordsStatus.textContent = "저장 자료가 2개 이상 있어야 신규 키워드를 확인할 수 있습니다.";
+      newKeywordsBody.innerHTML = `<tr><td colspan="5">비교할 저장 자료가 부족합니다.</td></tr>`;
+      return;
+    }
+
+    const previous = reports[reports.length - 2];
+    const latest = reports[reports.length - 1];
+    newKeywordRows = buildNewKeywordRows(reports);
+    newKeywordsPeriod.textContent = `${periodLabel(previous)} 대비 ${periodLabel(latest)}`;
+    renderNewKeywordSummary();
+    renderNewKeywordRows();
+    newKeywordsSaveButton.disabled = false;
+  } catch (error) {
+    newKeywordRows = [];
+    newKeywordsSummary.replaceChildren();
+    newKeywordsStatus.textContent = error.message || "신규 키워드를 불러오지 못했습니다.";
+    newKeywordsBody.innerHTML = `<tr><td colspan="5">신규 키워드를 불러오지 못했습니다.</td></tr>`;
+  } finally {
+    newKeywordsRefreshButton.disabled = false;
+    newKeywordsApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
+  }
+}
+
+function buildNewKeywordRows(reports) {
+  const previous = reports[reports.length - 2];
+  const latest = reports[reports.length - 1];
+  const olderKeys = new Set(
+    reports.slice(0, -2).flatMap((report) => (report.rows || []).map((row) => normalizeText(row.keyword)).filter(Boolean))
+  );
+  const previousKeys = new Set((previous.rows || []).map((row) => normalizeText(row.keyword)).filter(Boolean));
+  const latestByKeyword = new Map();
+
+  for (const row of latest.rows || []) {
+    const key = normalizeText(row.keyword);
+    if (key && !latestByKeyword.has(key)) latestByKeyword.set(key, row);
+  }
+
+  return [...latestByKeyword.entries()]
+    .filter(([key]) => !previousKeys.has(key))
+    .map(([key, row]) => ({
+      key,
+      keyword: row.keyword,
+      rank: Number(row.rank),
+      appearanceType: olderKeys.has(key) ? "returning" : "first",
+      suggestion: autoProductCategoryFor(row.keyword)
+    }))
+    .sort((a, b) => a.rank - b.rank || a.keyword.localeCompare(b.keyword, "ko"));
+}
+
+function renderNewKeywordSummary() {
+  const firstCount = newKeywordRows.filter((row) => row.appearanceType === "first").length;
+  const returningCount = newKeywordRows.filter((row) => row.appearanceType === "returning").length;
+  const mappedCount = newKeywordRows.filter((row) => manualCategoryFor(row.keyword)).length;
+  const unmappedCount = newKeywordRows.length - mappedCount;
+
+  newKeywordsSummary.innerHTML = [
+    comparisonMetricHtml("신규·재진입 합계", `${newKeywordRows.length}개`, "직전 저장 자료에 없던 검색어"),
+    comparisonMetricHtml("최초 등장", `${firstCount}개`, "과거 저장 자료에도 없던 검색어"),
+    comparisonMetricHtml("재진입", `${returningCount}개`, "과거에는 있었으나 직전 기간에는 없던 검색어"),
+    comparisonMetricHtml("분류 완료 / 미분류", `${mappedCount} / ${unmappedCount}`, "직접 저장한 제품군 카테고리 기준")
+  ].join("");
+}
+
+function renderNewKeywordRows() {
+  const search = normalizeText(newKeywordsSearch.value);
+  const filter = newKeywordsFilter.value;
+  const rows = newKeywordRows.filter((row) => {
+    const manualCategory = manualCategoryFor(row.keyword);
+    const mapped = Boolean(manualCategory);
+    if (filter === "mapped" && !mapped) return false;
+    if (filter === "unmapped" && mapped) return false;
+    if ((filter === "first" || filter === "returning") && row.appearanceType !== filter) return false;
+    return !search
+      || normalizeText(row.keyword).includes(search)
+      || normalizeText(manualCategory || row.suggestion).includes(search);
+  });
+  const mappedCount = newKeywordRows.filter((row) => manualCategoryFor(row.keyword)).length;
+
+  newKeywordsStatus.textContent = `신규·재진입 ${newKeywordRows.length}개 중 ${rows.length}개 표시 · 분류 완료 ${mappedCount}개`;
+  if (!rows.length) {
+    newKeywordsBody.innerHTML = `<tr><td colspan="5">조건에 맞는 신규 키워드가 없습니다.</td></tr>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const keywordCell = document.createElement("td");
+    const rankCell = document.createElement("td");
+    const typeCell = document.createElement("td");
+    const suggestionCell = document.createElement("td");
+    const categoryCell = document.createElement("td");
+    const select = createCategorySelect(row.keyword, () => {
+      renderNewKeywordSummary();
+      const currentMappedCount = newKeywordRows.filter((item) => manualCategoryFor(item.keyword)).length;
+      newKeywordsStatus.textContent = `신규·재진입 ${newKeywordRows.length}개 · 분류 완료 ${currentMappedCount}개 · 저장 필요`;
+      newKeywordsApplySuggestionsButton.disabled = !newKeywordRows.some((item) => !manualCategoryFor(item.keyword));
+    });
+
+    keywordCell.innerHTML = `<strong>${escapeHtml(row.keyword)}</strong>`;
+    rankCell.textContent = row.rank;
+    typeCell.innerHTML = newKeywordAppearanceBadge(row.appearanceType);
+    suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(row.suggestion)}</span>`;
+    categoryCell.append(select);
+    tr.append(keywordCell, rankCell, typeCell, suggestionCell, categoryCell);
+    fragment.append(tr);
+  }
+
+  newKeywordsBody.replaceChildren(fragment);
+}
+
+function newKeywordAppearanceBadge(type) {
+  const label = type === "returning" ? "재진입" : "최초 등장";
+  return `<span class="new-keyword-badge ${type}">${label}</span>`;
+}
+
+function applyNewKeywordSuggestions() {
+  let appliedCount = 0;
+  for (const row of newKeywordRows) {
+    if (manualCategoryFor(row.keyword)) continue;
+    updateCategoryMapping(row.keyword, row.suggestion);
+    appliedCount += 1;
+  }
+
+  newKeywordsFilter.value = "all";
+  renderNewKeywordSummary();
+  renderNewKeywordRows();
+  newKeywordsStatus.textContent = `${appliedCount}개 키워드에 자동 추천을 적용했습니다. 카테고리 저장을 눌러 확정해주세요.`;
+  newKeywordsApplySuggestionsButton.disabled = true;
+}
+
+async function saveNewKeywordMappings() {
+  newKeywordsSaveButton.disabled = true;
+  newKeywordsStatus.textContent = "신규 키워드 카테고리를 저장하는 중입니다.";
+
+  try {
+    const saved = await persistCategoryMappings();
+    renderNewKeywordSummary();
+    renderNewKeywordRows();
+    newKeywordsStatus.textContent = `${saved.mappings.length}개 키워드 매칭을 저장했습니다. 이후 모든 리포트와 비교에 반영됩니다.`;
+  } catch (error) {
+    newKeywordsStatus.textContent = error.message;
+  } finally {
+    newKeywordsSaveButton.disabled = false;
+  }
+}
+
 async function renderComparisonSheet(options = {}) {
   initializeComparisonSelection();
   pruneComparisonSelection();
   if (!options.keepPeriodList) renderComparisonPeriodList();
 
   const selectedKeys = chronologicalReportKeys(reportKeys.filter((key) => comparisonSelectedKeys.has(key)));
-  comparisonStatus.textContent = `${reportKeys.length}개 저장 자료 중 ${selectedKeys.length}개 선택`;
+  const modeConfig = COMPARISON_MODES[comparisonMode];
+  const minimumSelection = modeConfig.monthCount * 2;
+  comparisonStatus.textContent = `${reportKeys.length}개 저장 자료 중 ${selectedKeys.length}개 선택 · ${modeConfig.label} 비교`;
   comparisonDownloadButton.disabled = true;
+  comparisonEmailCopyButton.disabled = true;
 
-  if (selectedKeys.length < 2) {
-    clearComparisonView("비교할 기간을 2개 이상 선택해주세요.");
+  if (selectedKeys.length < minimumSelection) {
+    const message = comparisonMode === "month"
+      ? "비교할 기간을 2개 이상 선택해주세요."
+      : `${modeConfig.label} 비교에는 완전한 월 자료가 최소 ${minimumSelection}개 필요합니다.`;
+    clearComparisonView(message);
     return;
   }
 
-  comparisonStatus.textContent = `${selectedKeys.length}개 기간의 자료를 불러오는 중입니다.`;
+  comparisonStatus.textContent = `${selectedKeys.length}개 저장 자료를 불러와 ${modeConfig.label} 순위를 계산하는 중입니다.`;
   if (options.refreshReports) reportCache = new Map();
 
-  const reports = (await Promise.all(selectedKeys.map((key) => fetchReport(key)))).filter(Boolean);
-  if (reports.length < 2) {
+  const rawReports = (await Promise.all(selectedKeys.map((key) => fetchReport(key)))).filter(Boolean);
+  if (rawReports.length < minimumSelection) {
     clearComparisonView("선택한 자료 중 일부를 불러오지 못했습니다.");
+    return;
+  }
+
+  const grouped = buildComparisonPeriods(rawReports, comparisonMode);
+  const reports = grouped.periods;
+  if (reports.length < 2) {
+    clearComparisonView(`${modeConfig.label}로 완성되는 비교 기간이 2개 미만입니다. ${grouped.note}`.trim());
     return;
   }
 
@@ -995,10 +1225,173 @@ async function renderComparisonSheet(options = {}) {
   renderComparisonKeywordRows();
 
   const first = reports[0];
+  const previous = reports[reports.length - 2];
   const latest = reports[reports.length - 1];
-  comparisonRangeLabel.textContent = `${periodLabel(first)} 대비 ${periodLabel(latest)}`;
-  comparisonStatus.textContent = `${reports.length}개 기간 비교 중 · ${periodLabel(first)} → ${periodLabel(latest)}`;
+  comparisonRangeLabel.textContent = `키워드 ${periodLabel(previous)} 대비 ${periodLabel(latest)} · 제품군 증감 ${periodLabel(first)} 대비 ${periodLabel(latest)} · ${comparisonMethodText(comparisonMode)}`;
+  comparisonStatus.textContent = `${selectedKeys.length}개 저장 자료로 ${reports.length}개 ${modeConfig.label} 기간 비교 중 · ${grouped.note}`;
   comparisonDownloadButton.disabled = false;
+  comparisonEmailCopyButton.disabled = false;
+}
+
+function readComparisonMode() {
+  try {
+    const saved = localStorage.getItem(COMPARISON_MODE_STORAGE_KEY);
+    return COMPARISON_MODES[saved] ? saved : "month";
+  } catch {
+    return "month";
+  }
+}
+
+function updateComparisonModeButtons() {
+  for (const button of comparisonModeButtons) {
+    const active = button.dataset.comparisonMode === comparisonMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+function comparisonMethodText(mode = comparisonMode) {
+  if (mode === "month") {
+    return "월별 저장 자료의 검색 순위를 직접 비교하며 기간별 상대 점수는 사용하지 않습니다.";
+  }
+
+  const config = COMPARISON_MODES[mode];
+  return `${config.monthCount}개 구성 월의 검색 순위를 평균합니다. 해당 월에 없는 키워드는 501위로 반영한 뒤 묶음 기간 안에서 다시 1~500위 순위를 부여하며 상대 점수는 사용하지 않습니다.`;
+}
+
+function buildComparisonPeriods(reports, mode) {
+  const sortedReports = [...reports].sort((a, b) => reportEndDate(a).localeCompare(reportEndDate(b)));
+  if (mode === "month") {
+    return {
+      periods: sortedReports,
+      note: "월별 검색 순위 기준 · 상대 점수 미사용"
+    };
+  }
+
+  const monthReports = new Map();
+  let excludedCount = 0;
+  for (const report of sortedReports) {
+    const monthInfo = completeCalendarMonthInfo(report);
+    if (!monthInfo) {
+      excludedCount += 1;
+      continue;
+    }
+    monthReports.set(monthInfo.monthKey, report);
+  }
+
+  const groupDefinitions = new Map();
+  for (const monthKey of monthReports.keys()) {
+    const definition = comparisonGroupDefinition(monthKey, mode);
+    if (definition) groupDefinitions.set(definition.key, definition);
+  }
+
+  const periods = [];
+  let incompleteCount = 0;
+  for (const definition of [...groupDefinitions.values()].sort((a, b) => a.startDate.localeCompare(b.startDate))) {
+    const sourceReports = definition.monthKeys.map((monthKey) => monthReports.get(monthKey));
+    if (sourceReports.some((report) => !report)) {
+      incompleteCount += 1;
+      continue;
+    }
+    periods.push(aggregateRankingPeriod(definition, sourceReports));
+  }
+
+  const notes = [`완성된 ${COMPARISON_MODES[mode].label} ${periods.length}개`];
+  if (incompleteCount) notes.push(`월이 빠진 묶음 ${incompleteCount}개 제외`);
+  if (excludedCount) notes.push(`완전한 달력 월이 아닌 자료 ${excludedCount}개 제외`);
+  notes.push("상대 점수 미사용");
+  return { periods, note: notes.join(" · ") };
+}
+
+function completeCalendarMonthInfo(report) {
+  const startDate = String(report.startDate || "");
+  const endDate = String(report.endDate || "");
+  const match = startDate.match(/^(\d{4})-(\d{2})-01$/);
+  if (!match) return null;
+
+  const monthKey = `${match[1]}-${match[2]}`;
+  if (endDate !== lastDayOfMonth(monthKey)) return null;
+  return { monthKey, year: Number(match[1]), month: Number(match[2]) };
+}
+
+function comparisonGroupDefinition(monthKey, mode) {
+  const match = String(monthKey).match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  let startMonth;
+  let monthCount;
+  let key;
+  let label;
+
+  if (mode === "quarter") {
+    const quarter = Math.floor((month - 1) / 3) + 1;
+    startMonth = (quarter - 1) * 3 + 1;
+    monthCount = 3;
+    key = `${year}-Q${quarter}`;
+    label = `${year}년 ${quarter}분기`;
+  } else if (mode === "half") {
+    const half = month <= 6 ? 1 : 2;
+    startMonth = half === 1 ? 1 : 7;
+    monthCount = 6;
+    key = `${year}-H${half}`;
+    label = `${year}년 ${half === 1 ? "상반기" : "하반기"}`;
+  } else if (mode === "year") {
+    startMonth = 1;
+    monthCount = 12;
+    key = String(year);
+    label = `${year}년`;
+  } else {
+    return null;
+  }
+
+  const monthKeys = Array.from({ length: monthCount }, (_, index) => `${year}-${String(startMonth + index).padStart(2, "0")}`);
+  const startDate = `${monthKeys[0]}-01`;
+  const endDate = lastDayOfMonth(monthKeys[monthKeys.length - 1]);
+  return { key, label, monthKeys, startDate, endDate };
+}
+
+function aggregateRankingPeriod(definition, sourceReports) {
+  const reportMaps = sourceReports.map((report) => new Map(
+    (report.rows || [])
+      .map((row) => [normalizeText(row.keyword), row])
+      .filter(([key]) => key)
+  ));
+  const keys = new Set(reportMaps.flatMap((rows) => [...rows.keys()]));
+  const rankedRows = [...keys].map((key) => {
+    const points = reportMaps.map((rows) => rows.get(key) || null);
+    const ranks = points.map((row) => row ? Number(row.rank) : MISSING_MONTH_RANK);
+    const keyword = [...points].reverse().find(Boolean)?.keyword || key;
+    return {
+      keyword,
+      averageMonthlyRank: ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length,
+      presentMonthCount: points.filter(Boolean).length,
+      latestMonthlyRank: Number([...points].reverse().find(Boolean)?.rank || MISSING_MONTH_RANK)
+    };
+  }).sort((a, b) =>
+    a.averageMonthlyRank - b.averageMonthlyRank
+    || b.presentMonthCount - a.presentMonthCount
+    || a.latestMonthlyRank - b.latestMonthlyRank
+    || a.keyword.localeCompare(b.keyword, "ko")
+  ).slice(0, 500).map((row, index) => ({
+    rank: index + 1,
+    keyword: row.keyword,
+    dailyAverageRatio: 0,
+    averageMonthlyRank: Number(row.averageMonthlyRank.toFixed(3)),
+    presentMonthCount: row.presentMonthCount
+  }));
+
+  return {
+    month: definition.key,
+    comparisonLabel: definition.label,
+    startDate: definition.startDate,
+    endDate: definition.endDate,
+    count: rankedRows.length,
+    rows: rankedRows,
+    sourceMonthCount: sourceReports.length,
+    categoryPath: sourceReports.at(-1)?.categoryPath || []
+  };
 }
 
 function initializeComparisonSelection() {
@@ -1065,6 +1458,7 @@ function clearComparisonView(message) {
   comparisonKeywordRows = [];
   comparisonLatestChanges = [];
   comparisonSummary.replaceChildren();
+  comparisonStatus.textContent = message;
   comparisonInsights.innerHTML = `<p class="empty">${escapeHtml(message)}</p>`;
   comparisonRangeLabel.textContent = "";
   comparisonLatestStatus.textContent = message;
@@ -1075,6 +1469,8 @@ function clearComparisonView(message) {
   comparisonKeywordHead.innerHTML = "";
   comparisonKeywordBody.innerHTML = `<tr><td>${escapeHtml(message)}</td></tr>`;
   comparisonKeywordStatus.textContent = message;
+  comparisonDownloadButton.disabled = true;
+  comparisonEmailCopyButton.disabled = true;
 }
 
 function buildComparisonCategoryRows(reports, keywordRows) {
@@ -1129,32 +1525,32 @@ function buildComparisonKeywordRows(reports) {
 
   return [...keys].map((key) => {
     const points = reportMaps.map((rows) => rows.get(key) || null);
-    const first = points[0];
+    const previous = points[points.length - 2];
     const latest = points[points.length - 1];
-    const keyword = latest?.keyword || [...points].reverse().find(Boolean)?.keyword || first?.keyword || key;
-    const rankDelta = first && latest ? Number(first.rank) - Number(latest.rank) : null;
+    const keyword = latest?.keyword || previous?.keyword || [...points].reverse().find(Boolean)?.keyword || key;
+    const rankDelta = previous && latest ? Number(previous.rank) - Number(latest.rank) : null;
 
     return {
       key,
       keyword,
       category: productCategoryFor(keyword),
       points,
-      first,
+      previous,
       latest,
       rankDelta,
-      changeType: keywordChangeType(points, first, latest, rankDelta)
+      changeType: keywordChangeType(points, previous, latest, rankDelta)
     };
   }).sort((a, b) => {
     if (a.latest && !b.latest) return -1;
     if (!a.latest && b.latest) return 1;
-    return Number(a.latest?.rank || a.first?.rank || 9999) - Number(b.latest?.rank || b.first?.rank || 9999);
+    return Number(a.latest?.rank || a.previous?.rank || 9999) - Number(b.latest?.rank || b.previous?.rank || 9999);
   });
 }
 
-function keywordChangeType(points, first, latest, rankDelta) {
-  if (!first && !latest && points.some(Boolean)) return "intermediate";
-  if (!first && latest) return "new";
-  if (first && !latest) return "exited";
+function keywordChangeType(points, previous, latest, rankDelta) {
+  if (!previous && !latest && points.some(Boolean)) return "intermediate";
+  if (!previous && latest) return "new";
+  if (previous && !latest) return "exited";
   if (rankDelta > 0) return "rising";
   if (rankDelta < 0) return "falling";
   return "unchanged";
@@ -1254,17 +1650,17 @@ function latestChangeStatHtml(label, count, className) {
 }
 
 function renderComparisonSummary(reports, keywordRows) {
-  const commonCount = keywordRows.filter((row) => row.first && row.latest).length;
+  const commonCount = keywordRows.filter((row) => row.previous && row.latest).length;
   const newCount = keywordRows.filter((row) => row.changeType === "new").length;
   const exitedCount = keywordRows.filter((row) => row.changeType === "exited").length;
   const risingCount = keywordRows.filter((row) => row.changeType === "rising").length;
   const fallingCount = keywordRows.filter((row) => row.changeType === "falling").length;
 
   comparisonSummary.innerHTML = [
-    comparisonMetricHtml("선택 기간", `${reports.length}개`, `${periodLabel(reports[0])}부터`),
-    comparisonMetricHtml("공통 검색어", `${commonCount}개`, "첫·마지막 기간 모두 Top 500"),
-    comparisonMetricHtml("개별 검색어 신규 / 이탈", `${newCount} / ${exitedCount}`, "동일한 검색어 문구 기준"),
-    comparisonMetricHtml("순위 상승 / 하락", `${risingCount} / ${fallingCount}`, "검색 순위 기준")
+    comparisonMetricHtml(`${COMPARISON_MODES[comparisonMode].label} 비교 기간`, `${reports.length}개`, `${periodLabel(reports[0])}부터`),
+    comparisonMetricHtml("공통 검색어", `${commonCount}개`, "직전·최신 기간 모두 Top 500"),
+    comparisonMetricHtml("개별 검색어 신규 / 이탈", `${newCount} / ${exitedCount}`, "직전·최신 기간의 동일 문구 기준"),
+    comparisonMetricHtml("순위 상승 / 하락", `${risingCount} / ${fallingCount}`, "직전·최신 기간 검색 순위 기준")
   ].join("");
 }
 
@@ -1291,7 +1687,7 @@ function renderComparisonInsights(reports, categoryRows, keywordRows) {
 
   const rankInsight = rankWinner
     ? `<strong>최대 순위 상승</strong>${escapeHtml(rankWinner.keyword)}이 ${rankWinner.rankDelta}위 상승했습니다.`
-    : `<strong>순위 상승</strong>두 기준 기간에 공통으로 등장하며 순위가 오른 검색어가 없습니다.`;
+    : `<strong>순위 상승</strong>직전·최신 기간에 공통으로 등장하며 순위가 오른 검색어가 없습니다.`;
   const newInsight = bestNew
     ? `<strong>신규 진입 최고 순위</strong>${escapeHtml(bestNew.keyword)}이 ${bestNew.latest.rank}위로 진입했습니다.`
     : `<strong>신규 진입</strong>마지막 기간에 새로 Top 500에 진입한 검색어가 없습니다.`;
@@ -1349,11 +1745,12 @@ function categoryRankChangeClass(row) {
 }
 
 function renderComparisonKeywordTableHead(reports) {
+  const latestReports = reports.slice(-2);
   comparisonKeywordHead.innerHTML = `
     <tr>
       <th>검색어</th>
       <th>제품군</th>
-      ${reports.map((report) => `<th>${periodHeadingHtml(report)}<br>검색 순위</th>`).join("")}
+      ${latestReports.map((report) => `<th>${periodHeadingHtml(report)}<br>검색 순위</th>`).join("")}
       <th>순위 변동</th>
       <th>상태</th>
     </tr>
@@ -1365,14 +1762,17 @@ function renderComparisonKeywordRows() {
 
   const search = normalizeText(comparisonKeywordSearch.value);
   const filter = comparisonKeywordFilter.value;
-  const rows = comparisonKeywordRows.filter((row) => {
+  const comparableRows = comparisonKeywordRows.filter((row) => row.previous || row.latest);
+  const rows = comparableRows.filter((row) => {
     if (filter !== "all" && row.changeType !== filter) return false;
     return !search || normalizeText(row.keyword).includes(search) || normalizeText(row.category).includes(search);
   });
 
-  comparisonKeywordStatus.textContent = `검색 순위 기준 · 전체 ${comparisonKeywordRows.length}개 중 ${rows.length}개 표시`;
+  const previousReport = comparisonReports[comparisonReports.length - 2];
+  const latestReport = comparisonReports[comparisonReports.length - 1];
+  comparisonKeywordStatus.textContent = `${periodLabel(previousReport)} 대비 ${periodLabel(latestReport)} · 전체 ${comparableRows.length}개 중 ${rows.length}개 표시`;
   if (!rows.length) {
-    comparisonKeywordBody.innerHTML = `<tr><td colspan="${comparisonReports.length + 4}">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    comparisonKeywordBody.innerHTML = `<tr><td colspan="6">조건에 맞는 키워드가 없습니다.</td></tr>`;
     return;
   }
 
@@ -1380,7 +1780,7 @@ function renderComparisonKeywordRows() {
     <tr>
       <td><strong>${escapeHtml(row.keyword)}</strong></td>
       <td>${escapeHtml(row.category)}</td>
-      ${row.points.map((point) => `<td>${point ? Number(point.rank) : "-"}</td>`).join("")}
+      ${row.points.slice(-2).map((point) => `<td>${point ? Number(point.rank) : "-"}</td>`).join("")}
       <td class="${deltaClass(row.rankDelta)}">${row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta)}</td>
       <td>${changeBadgeHtml(row.changeType)}</td>
     </tr>
@@ -1388,7 +1788,8 @@ function renderComparisonKeywordRows() {
 }
 
 function periodHeadingHtml(report) {
-  return `<span class="comparison-period-heading">${escapeHtml(report.startDate || "")}<br>~ ${escapeHtml(report.endDate || "")}</span>`;
+  const label = report.comparisonLabel ? `<strong>${escapeHtml(report.comparisonLabel)}</strong><br>` : "";
+  return `<span class="comparison-period-heading">${label}${escapeHtml(report.startDate || "")}<br>~ ${escapeHtml(report.endDate || "")}</span>`;
 }
 
 function formatRankDelta(value) {
@@ -1426,9 +1827,10 @@ function downloadComparisonXlsx() {
 
   const periodLabels = comparisonReports.map((report) => periodLabel(report));
   const rows = [
-    ["기간별 비교"],
+    [`건강식품 ${COMPARISON_MODES[comparisonMode].label} 검색 순위 비교`],
+    ["비교 단위", COMPARISON_MODES[comparisonMode].label],
     ["비교 범위", periodLabels[0], periodLabels[periodLabels.length - 1]],
-    ["비교 기준", "검색 순위", "기간별 상대 점수는 비교에 사용하지 않음"],
+    ["비교 기준", "검색 순위", comparisonMethodText(comparisonMode)],
     [],
     [
       "제품군",
@@ -1464,14 +1866,14 @@ function downloadComparisonXlsx() {
     [
       "검색어",
       "제품군",
-      ...comparisonReports.map((report) => `${periodLabel(report)} 검색 순위`),
+      ...comparisonReports.slice(-2).map((report) => `${periodLabel(report)} 검색 순위`),
       "순위 변동",
       "상태"
     ],
-    ...comparisonKeywordRows.map((row) => [
+    ...comparisonKeywordRows.filter((row) => row.previous || row.latest).map((row) => [
       row.keyword,
       row.category,
-      ...row.points.map((point) => point ? Number(point.rank) : ""),
+      ...row.points.slice(-2).map((point) => point ? Number(point.rank) : ""),
       row.rankDelta == null ? "" : row.rankDelta,
       ({ new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", intermediate: "중간 기간만", unchanged: "변동 없음" })[row.changeType]
     ])
@@ -1480,11 +1882,229 @@ function downloadComparisonXlsx() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `comparison_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.xlsx`;
+  link.download = `comparison_${comparisonMode}_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.xlsx`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function copyComparisonEmail() {
+  if (comparisonReports.length < 2) return;
+
+  comparisonEmailCopyButton.disabled = true;
+  const originalText = comparisonEmailCopyButton.textContent;
+  try {
+    const content = buildComparisonEmailContent();
+    await writeRichClipboard(content.html, content.text);
+    comparisonEmailCopyButton.textContent = "복사 완료";
+    comparisonStatus.textContent = "메일 본문을 서식과 함께 복사했습니다. Outlook의 새 메일 본문에 붙여넣으세요.";
+  } catch (error) {
+    comparisonEmailCopyButton.textContent = "복사 실패";
+    comparisonStatus.textContent = error.message || "메일 본문을 복사하지 못했습니다.";
+  } finally {
+    window.setTimeout(() => {
+      comparisonEmailCopyButton.textContent = originalText;
+      comparisonEmailCopyButton.disabled = comparisonReports.length < 2;
+    }, 1800);
+  }
+}
+
+function buildComparisonEmailContent() {
+  const previous = comparisonReports[comparisonReports.length - 2];
+  const latest = comparisonReports[comparisonReports.length - 1];
+  const comparableRows = comparisonKeywordRows.filter((row) => row.previous || row.latest);
+  const counts = {
+    common: comparableRows.filter((row) => row.previous && row.latest).length,
+    new: comparableRows.filter((row) => row.changeType === "new").length,
+    exited: comparableRows.filter((row) => row.changeType === "exited").length,
+    rising: comparableRows.filter((row) => row.changeType === "rising").length,
+    falling: comparableRows.filter((row) => row.changeType === "falling").length
+  };
+  const latestCounts = {
+    rising: comparisonLatestChanges.filter((row) => row.changeType === "rising").length,
+    falling: comparisonLatestChanges.filter((row) => row.changeType === "falling").length,
+    new: comparisonLatestChanges.filter((row) => row.changeType === "new").length,
+    exited: comparisonLatestChanges.filter((row) => row.changeType === "exited").length
+  };
+  const title = `건강식품 ${COMPARISON_MODES[comparisonMode].label} 검색 순위 비교`;
+  const range = `${periodLabel(comparisonReports[0])} → ${periodLabel(latest)}`;
+  const latestRange = `${periodLabel(previous)} 대비 ${periodLabel(latest)}`;
+  const insightTexts = comparisonInsightTexts(comparisonCategoryRows, comparisonKeywordRows);
+  const categoryHeaders = [
+    "제품군",
+    ...comparisonReports.map((report) => periodLabel(report)),
+    "최고순위 변동",
+    "Top 100 증감",
+    "Top 500 증감"
+  ];
+  const categoryRows = comparisonCategoryRows.map((row) => [
+    row.category,
+    ...row.points.map((point) => point.bestRank
+      ? `최고 ${point.bestRank}위 / Top 100 ${point.top100Count}개 / Top 500 ${point.top500Count}개`
+      : "진입 없음"),
+    formatCategoryRankChange(row),
+    `${formatCountDelta(row.top100Delta)}개`,
+    `${formatCountDelta(row.top500Delta)}개`
+  ]);
+  const latestRows = comparisonLatestChanges.map((row) => [
+    row.keyword,
+    row.category,
+    row.previousRank || "-",
+    row.latestRank || "-",
+    row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta),
+    comparisonChangeLabel(row.changeType, true)
+  ]);
+  const keywordRows = comparableRows.map((row) => [
+    row.keyword,
+    row.category,
+    row.previous ? Number(row.previous.rank) : "-",
+    row.latest ? Number(row.latest.rank) : "-",
+    row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta),
+    comparisonChangeLabel(row.changeType)
+  ]);
+  const summaryItems = [
+    [`${COMPARISON_MODES[comparisonMode].label} 비교 기간`, `${comparisonReports.length}개`],
+    ["직전·최신 공통 검색어", `${counts.common}개`],
+    ["신규 / 이탈", `${counts.new} / ${counts.exited}`],
+    ["순위 상승 / 하락", `${counts.rising} / ${counts.falling}`]
+  ];
+  const summaryHtml = summaryItems.map(([label, value]) => `
+    <td style="width:25%;padding:12px;border:1px solid #d7dee8;background:#f8fafc;vertical-align:top;">
+      <div style="font-size:12px;color:#667482;">${escapeHtml(label)}</div>
+      <div style="margin-top:6px;font-size:20px;font-weight:700;color:#17202a;">${escapeHtml(value)}</div>
+    </td>
+  `).join("");
+  const latestSummaryHtml = [
+    [`${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, latestCounts.rising],
+    [`${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, latestCounts.falling],
+    ["신규 Top 500", latestCounts.new],
+    ["Top 500 이탈", latestCounts.exited]
+  ].map(([label, value]) => `
+    <td style="width:25%;padding:9px 10px;border:1px solid #d7dee8;">
+      <div style="font-size:11px;color:#667482;">${escapeHtml(label)}</div>
+      <strong style="display:block;margin-top:4px;color:#17202a;">${value}개</strong>
+    </td>
+  `).join("");
+
+  const html = `
+    <div style="max-width:1100px;font-family:Arial,'Noto Sans KR',sans-serif;color:#17202a;line-height:1.45;">
+      <div style="border-top:5px solid #168246;padding-top:18px;">
+        <div style="font-size:12px;font-weight:700;color:#168246;">NAVER SHOPPING INSIGHT</div>
+        <h1 style="margin:5px 0 4px;font-size:26px;line-height:1.25;">${escapeHtml(title)}</h1>
+        <div style="font-size:13px;color:#667482;">${escapeHtml(range)}</div>
+      </div>
+      <div style="margin:14px 0;padding:11px 13px;border-left:3px solid #168246;background:#eef7f1;font-size:12px;">
+        <strong>산정 기준</strong><br>${escapeHtml(comparisonMethodText(comparisonMode))}
+      </div>
+      <table role="presentation" style="width:100%;border-collapse:collapse;margin:14px 0 24px;"><tr>${summaryHtml}</tr></table>
+      <h2 style="margin:0 0 10px;font-size:18px;">변화 요약</h2>
+      ${insightTexts.map((text) => `<div style="margin:0 0 7px;padding:10px 12px;border-left:3px solid #168246;background:#f8fafc;font-size:13px;">${escapeHtml(text)}</div>`).join("")}
+      <h2 style="margin:24px 0 5px;font-size:18px;">최신 기간 주요 순위 변화</h2>
+      <div style="margin-bottom:10px;font-size:12px;color:#667482;">${escapeHtml(latestRange)}</div>
+      <table role="presentation" style="width:100%;border-collapse:collapse;margin-bottom:12px;"><tr>${latestSummaryHtml}</tr></table>
+      ${emailTableHtml(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], latestRows, "조건에 해당하는 최신 순위 변화가 없습니다.")}
+      <h2 style="margin:26px 0 10px;font-size:18px;">제품군 순위 비교</h2>
+      ${emailTableHtml(categoryHeaders, categoryRows)}
+      <h2 style="margin:26px 0 5px;font-size:18px;">키워드 비교</h2>
+      <div style="margin-bottom:10px;font-size:12px;color:#667482;">${escapeHtml(latestRange)} · 최신 2개 기간만 비교</div>
+      ${emailTableHtml(["검색어", "제품군", `${periodLabel(previous)} 순위`, `${periodLabel(latest)} 순위`, "순위 변동", "상태"], keywordRows)}
+    </div>
+  `;
+  const text = [
+    title,
+    range,
+    `산정 기준: ${comparisonMethodText(comparisonMode)}`,
+    "",
+    ...summaryItems.map(([label, value]) => `${label}: ${value}`),
+    "",
+    "변화 요약",
+    ...insightTexts,
+    "",
+    `최신 기간 주요 순위 변화 (${latestRange})`,
+    tabSeparatedText(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], latestRows),
+    "",
+    "제품군 순위 비교",
+    tabSeparatedText(categoryHeaders, categoryRows),
+    "",
+    `키워드 비교 (${latestRange})`,
+    tabSeparatedText(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], keywordRows)
+  ].join("\n");
+
+  return { html, text };
+}
+
+function comparisonInsightTexts(categoryRows, keywordRows) {
+  const rankWinner = keywordRows.filter((row) => row.rankDelta > 0).sort((a, b) => b.rankDelta - a.rankDelta)[0];
+  const bestNew = keywordRows
+    .filter((row) => row.changeType === "new")
+    .sort((a, b) => Number(a.latest?.rank || 9999) - Number(b.latest?.rank || 9999))[0];
+  const broadeningCategory = categoryRows
+    .filter((row) => row.top100Delta > 0 || row.top500Delta > 0)
+    .sort((a, b) => b.top100Delta - a.top100Delta || b.top500Delta - a.top500Delta)[0];
+
+  return [
+    rankWinner
+      ? `최대 순위 상승: ${rankWinner.keyword}이 ${rankWinner.rankDelta}위 상승했습니다.`
+      : "최대 순위 상승: 직전·최신 기간에 공통으로 등장하며 순위가 오른 검색어가 없습니다.",
+    bestNew
+      ? `신규 진입 최고 순위: ${bestNew.keyword}이 ${bestNew.latest.rank}위로 진입했습니다.`
+      : "신규 진입: 최신 기간에 새로 Top 500에 진입한 검색어가 없습니다.",
+    broadeningCategory
+      ? `상위권 확장 제품군: ${broadeningCategory.category}의 Top 100 키워드가 ${formatCountDelta(broadeningCategory.top100Delta)}개, Top 500 키워드가 ${formatCountDelta(broadeningCategory.top500Delta)}개 변했습니다.`
+      : "제품군 분포: 첫·마지막 기간 사이 Top 100 또는 Top 500 키워드 수가 늘어난 제품군이 없습니다."
+  ];
+}
+
+function comparisonChangeLabel(type, latestSection = false) {
+  const labels = latestSection
+    ? { new: "신규 Top 500", rising: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, falling: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, exited: "Top 500 이탈", unchanged: "변동 없음" }
+    : { new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", unchanged: "변동 없음" };
+  return labels[type] || labels.unchanged;
+}
+
+function emailTableHtml(headers, rows, emptyMessage = "표시할 자료가 없습니다.") {
+  const headerHtml = headers.map((header) => `<th style="padding:8px 9px;border:1px solid #d7dee8;background:#f1f4f7;color:#44515e;text-align:left;font-size:11px;">${escapeHtml(header)}</th>`).join("");
+  const bodyHtml = rows.length
+    ? rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:7px 9px;border:1px solid #d7dee8;font-size:12px;vertical-align:top;">${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${headers.length}" style="padding:10px;border:1px solid #d7dee8;color:#667482;font-size:12px;">${escapeHtml(emptyMessage)}</td></tr>`;
+  return `<table style="width:100%;border-collapse:collapse;border-spacing:0;"> <thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
+}
+
+function tabSeparatedText(headers, rows) {
+  return [headers, ...rows].map((row) => row.map((cell) => String(cell ?? "").replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+}
+
+async function writeRichClipboard(html, plainText) {
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    const item = new ClipboardItem({
+      "text/html": new Blob([html], { type: "text/html" }),
+      "text/plain": new Blob([plainText], { type: "text/plain" })
+    });
+    await navigator.clipboard.write([item]);
+    return;
+  }
+
+  const container = document.createElement("div");
+  container.contentEditable = "true";
+  container.style.position = "fixed";
+  container.style.left = "-10000px";
+  container.innerHTML = html;
+  document.body.append(container);
+
+  const selection = window.getSelection();
+  let copied = false;
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    copied = document.execCommand("copy");
+  } finally {
+    selection.removeAllRanges();
+    container.remove();
+  }
+  if (!copied) throw new Error("브라우저가 서식 복사를 허용하지 않았습니다.");
 }
 
 function parseKeywordGroups(text) {
@@ -1730,7 +2350,8 @@ function safeFileName(value) {
 
 function periodLabel(reportOrKey) {
   if (typeof reportOrKey === "object" && reportOrKey) {
-    return `${reportOrKey.startDate || ""} ~ ${reportOrKey.endDate || ""}`.trim();
+    const range = `${reportOrKey.startDate || ""} ~ ${reportOrKey.endDate || ""}`.trim();
+    return reportOrKey.comparisonLabel ? `${reportOrKey.comparisonLabel} (${range})` : range;
   }
 
   const key = String(reportOrKey || "");
