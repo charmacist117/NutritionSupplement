@@ -24,6 +24,21 @@ const mappingSearch = document.querySelector("#mapping-search");
 const mappingFilter = document.querySelector("#mapping-filter");
 const mappingStatus = document.querySelector("#mapping-status");
 const mappingBody = document.querySelector("#mapping-body");
+const comparisonSelectAllButton = document.querySelector("#comparison-select-all");
+const comparisonClearButton = document.querySelector("#comparison-clear");
+const comparisonDownloadButton = document.querySelector("#comparison-download");
+const comparisonPeriodList = document.querySelector("#comparison-period-list");
+const comparisonStatus = document.querySelector("#comparison-status");
+const comparisonSummary = document.querySelector("#comparison-summary");
+const comparisonRangeLabel = document.querySelector("#comparison-range-label");
+const comparisonInsights = document.querySelector("#comparison-insights");
+const comparisonCategoryHead = document.querySelector("#comparison-category-head");
+const comparisonCategoryBody = document.querySelector("#comparison-category-body");
+const comparisonKeywordSearch = document.querySelector("#comparison-keyword-search");
+const comparisonKeywordFilter = document.querySelector("#comparison-keyword-filter");
+const comparisonKeywordStatus = document.querySelector("#comparison-keyword-status");
+const comparisonKeywordHead = document.querySelector("#comparison-keyword-head");
+const comparisonKeywordBody = document.querySelector("#comparison-keyword-body");
 const PRODUCT_GROUPS = [
   "총합계",
   "오메가3",
@@ -80,6 +95,7 @@ const DEFAULT_KEYWORD_GROUPS = [
   "관절=관절,MSM,msm,보스웰리아,호관원"
 ];
 const REPORT_ORDER_STORAGE_KEY = "reportOrder";
+const COMPARISON_SELECTION_STORAGE_KEY = "comparisonReportSelection";
 
 let selectedMonth = null;
 let currentReport = null;
@@ -88,6 +104,11 @@ let reportCache = new Map();
 let categoryMappings = new Map();
 let mappingRows = [];
 let draggedReportKey = null;
+let comparisonSelectionLoaded = false;
+let comparisonSelectedKeys = new Set();
+let comparisonReports = [];
+let comparisonCategoryRows = [];
+let comparisonKeywordRows = [];
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -136,6 +157,33 @@ mappingSaveButton.addEventListener("click", async () => {
 
 mappingSearch.addEventListener("input", () => renderMappingRows());
 mappingFilter.addEventListener("change", () => renderMappingRows());
+
+comparisonSelectAllButton.addEventListener("click", async () => {
+  comparisonSelectedKeys = new Set(reportKeys);
+  saveComparisonSelection();
+  await renderComparisonSheet();
+});
+
+comparisonClearButton.addEventListener("click", async () => {
+  comparisonSelectedKeys = new Set();
+  saveComparisonSelection();
+  await renderComparisonSheet();
+});
+
+comparisonPeriodList.addEventListener("change", async (event) => {
+  const input = event.target.closest("input[data-report-key]");
+  if (!input) return;
+
+  if (input.checked) comparisonSelectedKeys.add(input.dataset.reportKey);
+  else comparisonSelectedKeys.delete(input.dataset.reportKey);
+  saveComparisonSelection();
+  await renderComparisonSheet({ keepPeriodList: true });
+});
+
+comparisonKeywordSearch.addEventListener("input", () => renderComparisonKeywordRows());
+comparisonKeywordFilter.addEventListener("change", () => renderComparisonKeywordRows());
+
+comparisonDownloadButton.addEventListener("click", () => downloadComparisonXlsx());
 
 collectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -214,6 +262,7 @@ async function loadMonths(preferredMonth = null) {
     clearReportView();
     await renderTrendDashboard();
     if (activeTab() === "mapping") await renderMappingSheet();
+    if (activeTab() === "comparison") await renderComparisonSheet();
     if (!collectButton.disabled && healthState.blobConfigured) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
@@ -226,6 +275,7 @@ async function loadMonths(preferredMonth = null) {
   await loadReport(nextMonth);
   await renderTrendDashboard();
   if (activeTab() === "mapping") await renderMappingSheet();
+  if (activeTab() === "comparison") await renderComparisonSheet();
 }
 
 function renderMonthList() {
@@ -275,6 +325,7 @@ async function setActiveTab(tab) {
   }
 
   if (tab === "mapping") await renderMappingSheet();
+  if (tab === "comparison") await renderComparisonSheet();
 }
 
 function activeTab() {
@@ -389,6 +440,7 @@ async function deleteReport(month) {
 
     await loadMonths(nextMonth);
     if (activeTab() === "mapping") await renderMappingSheet({ refreshReports: true });
+    if (activeTab() === "comparison") await renderComparisonSheet({ refreshReports: true });
     statusText.textContent = `${label} 리포트를 삭제했습니다.`;
   } catch (error) {
     statusText.textContent = error.message;
@@ -900,6 +952,384 @@ function scoreByProductGroup(rows) {
   }
 
   return scores;
+}
+
+async function renderComparisonSheet(options = {}) {
+  initializeComparisonSelection();
+  pruneComparisonSelection();
+  if (!options.keepPeriodList) renderComparisonPeriodList();
+
+  const selectedKeys = chronologicalReportKeys(reportKeys.filter((key) => comparisonSelectedKeys.has(key)));
+  comparisonStatus.textContent = `${reportKeys.length}개 저장 자료 중 ${selectedKeys.length}개 선택`;
+  comparisonDownloadButton.disabled = true;
+
+  if (selectedKeys.length < 2) {
+    clearComparisonView("비교할 기간을 2개 이상 선택해주세요.");
+    return;
+  }
+
+  comparisonStatus.textContent = `${selectedKeys.length}개 기간의 자료를 불러오는 중입니다.`;
+  if (options.refreshReports) reportCache = new Map();
+
+  const reports = (await Promise.all(selectedKeys.map((key) => fetchReport(key)))).filter(Boolean);
+  if (reports.length < 2) {
+    clearComparisonView("선택한 자료 중 일부를 불러오지 못했습니다.");
+    return;
+  }
+
+  comparisonReports = reports;
+  comparisonCategoryRows = buildComparisonCategoryRows(reports);
+  comparisonKeywordRows = buildComparisonKeywordRows(reports);
+
+  renderComparisonSummary(reports, comparisonKeywordRows);
+  renderComparisonInsights(reports, comparisonCategoryRows, comparisonKeywordRows);
+  renderComparisonCategoryTable(reports, comparisonCategoryRows);
+  renderComparisonKeywordTableHead(reports);
+  renderComparisonKeywordRows();
+
+  const first = reports[0];
+  const latest = reports[reports.length - 1];
+  comparisonRangeLabel.textContent = `${periodLabel(first)} 대비 ${periodLabel(latest)}`;
+  comparisonStatus.textContent = `${reports.length}개 기간 비교 중 · ${periodLabel(first)} → ${periodLabel(latest)}`;
+  comparisonDownloadButton.disabled = false;
+}
+
+function initializeComparisonSelection() {
+  if (comparisonSelectionLoaded) return;
+  comparisonSelectionLoaded = true;
+
+  const saved = localStorage.getItem(COMPARISON_SELECTION_STORAGE_KEY);
+  if (saved !== null) {
+    try {
+      const keys = JSON.parse(saved);
+      comparisonSelectedKeys = new Set(Array.isArray(keys) ? keys : []);
+      return;
+    } catch {
+      comparisonSelectedKeys = new Set();
+    }
+  }
+
+  const chronological = chronologicalReportKeys(reportKeys);
+  comparisonSelectedKeys = new Set(chronological.slice(-2));
+}
+
+function pruneComparisonSelection() {
+  const validKeys = new Set(reportKeys);
+  const nextKeys = [...comparisonSelectedKeys].filter((key) => validKeys.has(key));
+  if (nextKeys.length === comparisonSelectedKeys.size) return;
+
+  comparisonSelectedKeys = new Set(nextKeys);
+  saveComparisonSelection();
+}
+
+function saveComparisonSelection() {
+  localStorage.setItem(COMPARISON_SELECTION_STORAGE_KEY, JSON.stringify([...comparisonSelectedKeys]));
+}
+
+function renderComparisonPeriodList() {
+  comparisonPeriodList.replaceChildren();
+
+  if (!reportKeys.length) {
+    comparisonPeriodList.innerHTML = `<p class="empty">저장된 자료가 없습니다.</p>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const key of reportKeys) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    const text = document.createElement("span");
+
+    label.className = "comparison-period-option";
+    input.type = "checkbox";
+    input.dataset.reportKey = key;
+    input.checked = comparisonSelectedKeys.has(key);
+    text.textContent = periodLabel(key);
+    label.append(input, text);
+    fragment.append(label);
+  }
+
+  comparisonPeriodList.append(fragment);
+}
+
+function clearComparisonView(message) {
+  comparisonReports = [];
+  comparisonCategoryRows = [];
+  comparisonKeywordRows = [];
+  comparisonSummary.replaceChildren();
+  comparisonInsights.innerHTML = `<p class="empty">${escapeHtml(message)}</p>`;
+  comparisonRangeLabel.textContent = "";
+  comparisonCategoryHead.innerHTML = "";
+  comparisonCategoryBody.innerHTML = `<tr><td>${escapeHtml(message)}</td></tr>`;
+  comparisonKeywordHead.innerHTML = "";
+  comparisonKeywordBody.innerHTML = `<tr><td>${escapeHtml(message)}</td></tr>`;
+  comparisonKeywordStatus.textContent = message;
+}
+
+function buildComparisonCategoryRows(reports) {
+  const scoresByReport = reports.map((report) => scoreByProductGroup(report.rows || []));
+  const rows = PRODUCT_GROUPS.map((category) => {
+    const scores = scoresByReport.map((scores) => Number(scores.get(category) || 0));
+    const firstScore = scores[0] || 0;
+    const latestScore = scores[scores.length - 1] || 0;
+    return {
+      category,
+      scores,
+      firstScore,
+      latestScore,
+      scoreDelta: latestScore - firstScore,
+      percentDelta: firstScore ? ((latestScore - firstScore) / firstScore) * 100 : null
+    };
+  }).filter((row) => row.category === "총합계" || row.scores.some((score) => score > 0));
+
+  return rows.sort((a, b) => {
+    if (a.category === "총합계") return -1;
+    if (b.category === "총합계") return 1;
+    return b.latestScore - a.latestScore || b.scoreDelta - a.scoreDelta;
+  });
+}
+
+function buildComparisonKeywordRows(reports) {
+  const reportMaps = reports.map((report) => {
+    const rows = new Map();
+    for (const row of report.rows || []) {
+      const key = normalizeText(row.keyword);
+      if (key) rows.set(key, row);
+    }
+    return rows;
+  });
+  const keys = new Set(reportMaps.flatMap((rows) => [...rows.keys()]));
+
+  return [...keys].map((key) => {
+    const points = reportMaps.map((rows) => rows.get(key) || null);
+    const first = points[0];
+    const latest = points[points.length - 1];
+    const keyword = latest?.keyword || [...points].reverse().find(Boolean)?.keyword || first?.keyword || key;
+    const rankDelta = first && latest ? Number(first.rank) - Number(latest.rank) : null;
+    const scoreDelta = Number(latest?.dailyAverageRatio || 0) - Number(first?.dailyAverageRatio || 0);
+
+    return {
+      key,
+      keyword,
+      category: productCategoryFor(keyword),
+      points,
+      first,
+      latest,
+      rankDelta,
+      scoreDelta,
+      changeType: keywordChangeType(points, first, latest, rankDelta)
+    };
+  }).sort((a, b) => {
+    if (a.latest && !b.latest) return -1;
+    if (!a.latest && b.latest) return 1;
+    return Number(a.latest?.rank || a.first?.rank || 9999) - Number(b.latest?.rank || b.first?.rank || 9999);
+  });
+}
+
+function keywordChangeType(points, first, latest, rankDelta) {
+  if (!first && !latest && points.some(Boolean)) return "intermediate";
+  if (!first && latest) return "new";
+  if (first && !latest) return "exited";
+  if (rankDelta > 0) return "rising";
+  if (rankDelta < 0) return "falling";
+  return "unchanged";
+}
+
+function renderComparisonSummary(reports, keywordRows) {
+  const totals = reports.map((report) => (report.rows || []).reduce((sum, row) => sum + Number(row.dailyAverageRatio || 0), 0));
+  const firstTotal = totals[0] || 0;
+  const latestTotal = totals[totals.length - 1] || 0;
+  const totalDelta = latestTotal - firstTotal;
+  const totalPercent = firstTotal ? (totalDelta / firstTotal) * 100 : null;
+  const newCount = keywordRows.filter((row) => row.changeType === "new").length;
+  const exitedCount = keywordRows.filter((row) => row.changeType === "exited").length;
+  const risingCount = keywordRows.filter((row) => row.changeType === "rising").length;
+
+  comparisonSummary.innerHTML = [
+    comparisonMetricHtml("선택 기간", `${reports.length}개`, `${periodLabel(reports[0])}부터`),
+    comparisonMetricHtml("상대점수 총계 증감", formatDelta(totalDelta), totalPercent == null ? "기준값 없음" : formatPercent(totalPercent), deltaClass(totalDelta)),
+    comparisonMetricHtml("개별 검색어 신규 / 이탈", `${newCount} / ${exitedCount}`, "동일한 검색어 문구 기준"),
+    comparisonMetricHtml("순위 상승 키워드", `${risingCount}개`, "두 기간 모두 Top 500인 검색어")
+  ].join("");
+}
+
+function comparisonMetricHtml(label, value, detail, className = "") {
+  return `
+    <div class="comparison-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${className}">${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
+}
+
+function renderComparisonInsights(reports, categoryRows, keywordRows) {
+  const growingCategory = categoryRows
+    .filter((row) => row.category !== "총합계" && row.scoreDelta > 0)
+    .sort((a, b) => b.scoreDelta - a.scoreDelta)[0];
+  const fallingCategory = categoryRows
+    .filter((row) => row.category !== "총합계" && row.scoreDelta < 0)
+    .sort((a, b) => a.scoreDelta - b.scoreDelta)[0];
+  const rankWinner = keywordRows
+    .filter((row) => row.rankDelta > 0)
+    .sort((a, b) => b.rankDelta - a.rankDelta)[0];
+  const bestNew = keywordRows
+    .filter((row) => row.changeType === "new")
+    .sort((a, b) => Number(a.latest?.rank || 9999) - Number(b.latest?.rank || 9999))[0];
+
+  const categoryInsight = growingCategory
+    ? `<strong>성장 제품군</strong>${escapeHtml(growingCategory.category)} 제품군이 ${escapeHtml(formatDelta(growingCategory.scoreDelta))}점으로 가장 크게 증가했습니다.`
+    : `<strong>성장 제품군</strong>첫 기간보다 점수가 증가한 제품군이 없습니다.`;
+  const declineInsight = fallingCategory
+    ? `<strong>감소 제품군</strong>${escapeHtml(fallingCategory.category)} 제품군이 ${escapeHtml(formatDelta(fallingCategory.scoreDelta))}점으로 가장 크게 감소했습니다.`
+    : `<strong>감소 제품군</strong>첫 기간보다 점수가 감소한 제품군이 없습니다.`;
+  const keywordInsight = rankWinner
+    ? `<strong>최대 순위 상승</strong>${escapeHtml(rankWinner.keyword)}이 ${rankWinner.rankDelta}위 상승했습니다.${bestNew ? ` 신규 진입 최고 순위는 ${escapeHtml(bestNew.keyword)} ${bestNew.latest.rank}위입니다.` : ""}`
+    : bestNew
+      ? `<strong>신규 진입</strong>${escapeHtml(bestNew.keyword)}이 ${bestNew.latest.rank}위로 가장 높게 진입했습니다.`
+      : `<strong>키워드 변화</strong>두 기준 기간 사이에 순위 상승 또는 신규 진입 키워드가 없습니다.`;
+
+  comparisonInsights.innerHTML = [categoryInsight, declineInsight, keywordInsight]
+    .map((content) => `<div class="comparison-insight">${content}</div>`)
+    .join("");
+}
+
+function renderComparisonCategoryTable(reports, rows) {
+  comparisonCategoryHead.innerHTML = `
+    <tr>
+      <th>제품군</th>
+      ${reports.map((report) => `<th>${periodHeadingHtml(report)}</th>`).join("")}
+      <th>점수 증감</th>
+      <th>증감률</th>
+    </tr>
+  `;
+  comparisonCategoryBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td><strong>${escapeHtml(row.category)}</strong></td>
+      ${row.scores.map((score) => `<td>${formatScore(score)}</td>`).join("")}
+      <td class="${deltaClass(row.scoreDelta)}">${formatDelta(row.scoreDelta)}</td>
+      <td class="${deltaClass(row.scoreDelta)}">${row.percentDelta == null ? "-" : formatPercent(row.percentDelta)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderComparisonKeywordTableHead(reports) {
+  comparisonKeywordHead.innerHTML = `
+    <tr>
+      <th>검색어</th>
+      <th>제품군</th>
+      ${reports.map((report) => `<th>${periodHeadingHtml(report)}<br>순위 · 점수</th>`).join("")}
+      <th>순위 변동</th>
+      <th>점수 증감</th>
+      <th>상태</th>
+    </tr>
+  `;
+}
+
+function renderComparisonKeywordRows() {
+  if (!comparisonReports.length) return;
+
+  const search = normalizeText(comparisonKeywordSearch.value);
+  const filter = comparisonKeywordFilter.value;
+  const rows = comparisonKeywordRows.filter((row) => {
+    if (filter !== "all" && row.changeType !== filter) return false;
+    return !search || normalizeText(row.keyword).includes(search) || normalizeText(row.category).includes(search);
+  });
+
+  comparisonKeywordStatus.textContent = `개별 검색어 기준 · 전체 ${comparisonKeywordRows.length}개 중 ${rows.length}개 표시`;
+  if (!rows.length) {
+    comparisonKeywordBody.innerHTML = `<tr><td colspan="${comparisonReports.length + 6}">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    return;
+  }
+
+  comparisonKeywordBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td><strong>${escapeHtml(row.keyword)}</strong></td>
+      <td>${escapeHtml(row.category)}</td>
+      ${row.points.map((point) => `<td>${point ? `${Number(point.rank)} · ${formatScore(point.dailyAverageRatio)}` : "-"}</td>`).join("")}
+      <td class="${deltaClass(row.rankDelta)}">${row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta)}</td>
+      <td class="${deltaClass(row.scoreDelta)}">${formatDelta(row.scoreDelta)}</td>
+      <td>${changeBadgeHtml(row.changeType)}</td>
+    </tr>
+  `).join("");
+}
+
+function periodHeadingHtml(report) {
+  return `<span class="comparison-period-heading">${escapeHtml(report.startDate || "")}<br>~ ${escapeHtml(report.endDate || "")}</span>`;
+}
+
+function formatRankDelta(value) {
+  const number = Number(value || 0);
+  if (!number) return "0";
+  return `${number > 0 ? "+" : ""}${number}위`;
+}
+
+function formatPercent(value) {
+  const number = Number(value || 0);
+  if (!number) return "0.0%";
+  return `${number > 0 ? "+" : ""}${number.toFixed(1)}%`;
+}
+
+function deltaClass(value) {
+  const number = Number(value || 0);
+  return number > 0 ? "positive" : number < 0 ? "negative" : "";
+}
+
+function changeBadgeHtml(type) {
+  const labels = {
+    new: "신규 진입",
+    rising: "순위 상승",
+    falling: "순위 하락",
+    exited: "Top 500 이탈",
+    intermediate: "중간 기간만",
+    unchanged: "변동 없음"
+  };
+  const className = type === "new" || type === "rising" ? "positive" : type === "falling" || type === "exited" ? "negative" : "";
+  return `<span class="change-badge ${className}">${labels[type] || labels.unchanged}</span>`;
+}
+
+function downloadComparisonXlsx() {
+  if (comparisonReports.length < 2) return;
+
+  const periodLabels = comparisonReports.map((report) => periodLabel(report));
+  const rows = [
+    ["기간별 비교"],
+    ["비교 범위", periodLabels[0], periodLabels[periodLabels.length - 1]],
+    [],
+    ["제품군", ...periodLabels, "점수 증감", "증감률"],
+    ...comparisonCategoryRows.map((row) => [
+      row.category,
+      ...row.scores.map(roundScore),
+      roundScore(row.scoreDelta),
+      row.percentDelta == null ? "" : `${Number(row.percentDelta.toFixed(1))}%`
+    ]),
+    [],
+    [
+      "검색어",
+      "제품군",
+      ...comparisonReports.flatMap((report) => [`${periodLabel(report)} 순위`, `${periodLabel(report)} 점수`]),
+      "순위 변동",
+      "점수 증감",
+      "상태"
+    ],
+    ...comparisonKeywordRows.map((row) => [
+      row.keyword,
+      row.category,
+      ...row.points.flatMap((point) => point ? [Number(point.rank), roundScore(point.dailyAverageRatio)] : ["", ""]),
+      row.rankDelta == null ? "" : row.rankDelta,
+      roundScore(row.scoreDelta),
+      ({ new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", intermediate: "중간 기간만", unchanged: "변동 없음" })[row.changeType]
+    ])
+  ];
+  const blob = createXlsxBlob("기간별 비교", rows);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `comparison_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.xlsx`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function parseKeywordGroups(text) {

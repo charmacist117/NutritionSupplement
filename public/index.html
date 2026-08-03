@@ -32,6 +32,7 @@
       <nav class="tab-list" aria-label="대시보드 보기">
         <button class="tab-button active" type="button" data-tab="reports">기간별 리포트</button>
         <button class="tab-button" type="button" data-tab="mapping">키워드 카테고리 매칭</button>
+        <button class="tab-button" type="button" data-tab="comparison">기간별 비교</button>
       </nav>
 
       <div class="tab-view active" data-tab-view="reports">
@@ -150,6 +151,89 @@
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="comparison-panel tab-view" data-tab-view="comparison">
+        <div class="comparison-header">
+          <div>
+            <h2>기간별 비교</h2>
+            <p>저장 자료를 선택하면 처음과 마지막 기간을 기준으로 검색어 순위와 상대 점수, 제품군 변화를 비교합니다.</p>
+          </div>
+          <div class="comparison-actions">
+            <button id="comparison-select-all" class="secondary-button" type="button">전체 선택</button>
+            <button id="comparison-clear" class="secondary-button" type="button">선택 해제</button>
+            <button id="comparison-download" type="button" disabled>비교 엑셀</button>
+          </div>
+        </div>
+
+        <fieldset class="comparison-periods">
+          <legend>비교할 저장 자료</legend>
+          <div id="comparison-period-list" class="comparison-period-list"></div>
+        </fieldset>
+        <p id="comparison-status" class="comparison-status">비교할 기간을 2개 이상 선택해주세요.</p>
+
+        <div id="comparison-summary" class="comparison-summary"></div>
+
+        <section class="comparison-section">
+          <div class="section-heading">
+            <div>
+              <h2>변화 요약</h2>
+              <p id="comparison-range-label"></p>
+            </div>
+          </div>
+          <div id="comparison-insights" class="comparison-insights"></div>
+        </section>
+
+        <section class="comparison-section">
+          <div class="section-heading">
+            <div>
+              <h2>제품군 점수 비교</h2>
+              <p>키워드 카테고리 매칭을 반영한 제품군별 상대 점수 합계입니다.</p>
+            </div>
+          </div>
+          <div class="table-wrap comparison-table-wrap">
+            <table>
+              <thead id="comparison-category-head"></thead>
+              <tbody id="comparison-category-body">
+                <tr><td>비교할 기간을 선택해주세요.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="comparison-section">
+          <div class="section-heading comparison-keyword-heading">
+            <div>
+              <h2>키워드 비교</h2>
+              <p id="comparison-keyword-status">비교할 기간을 선택해주세요.</p>
+            </div>
+            <div class="comparison-filters">
+              <label>
+                검색
+                <input id="comparison-keyword-search" type="search" placeholder="검색어 또는 제품군">
+              </label>
+              <label>
+                변화
+                <select id="comparison-keyword-filter">
+                  <option value="all">전체</option>
+                  <option value="new">신규 진입</option>
+                  <option value="rising">순위 상승</option>
+                  <option value="falling">순위 하락</option>
+                  <option value="exited">Top 500 이탈</option>
+                  <option value="intermediate">중간 기간만</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="table-wrap comparison-keyword-table-wrap">
+            <table>
+              <thead id="comparison-keyword-head"></thead>
+              <tbody id="comparison-keyword-body">
+                <tr><td>비교할 기간을 선택해주세요.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
 

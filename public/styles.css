@@ -32,7 +32,8 @@ body {
 .month-panel,
 .report-panel,
 .trend-panel,
-.mapping-panel {
+.mapping-panel,
+.comparison-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -137,6 +138,7 @@ button:disabled {
   display: flex;
   gap: 8px;
   border-bottom: 1px solid var(--line);
+  overflow-x: auto;
 }
 
 .tab-button {
@@ -157,6 +159,7 @@ button:disabled {
 
 .tab-view {
   display: none;
+  min-width: 0;
 }
 
 .tab-view.active {
@@ -280,6 +283,8 @@ button:disabled {
 }
 
 .table-wrap {
+  width: 100%;
+  min-width: 0;
   max-height: 680px;
   overflow: auto;
   margin-top: 18px;
@@ -292,7 +297,9 @@ button:disabled {
 }
 
 .trend-header,
-.mapping-header {
+.mapping-header,
+.comparison-header,
+.section-heading {
   display: flex;
   align-items: start;
   justify-content: space-between;
@@ -300,7 +307,9 @@ button:disabled {
 }
 
 .trend-header p,
-.mapping-header p {
+.mapping-header p,
+.comparison-header p,
+.section-heading p {
   margin-top: 8px;
   color: var(--muted);
   font-size: 13px;
@@ -351,6 +360,253 @@ button:disabled {
 
 .mapping-panel {
   padding: 20px;
+}
+
+.comparison-panel {
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+}
+
+.comparison-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.secondary-button {
+  background: #f8fafc;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.secondary-button:hover {
+  background: var(--soft);
+  color: var(--accent-strong);
+}
+
+.comparison-periods {
+  min-width: 0;
+  margin: 18px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.comparison-periods legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comparison-period-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.comparison-period-option {
+  min-width: 0;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.comparison-period-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent-strong);
+}
+
+.comparison-period-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.comparison-period-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.comparison-status {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.comparison-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.comparison-metric {
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.comparison-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.comparison-metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 21px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.comparison-metric small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.positive {
+  color: #08783f;
+}
+
+.negative {
+  color: #b42318;
+}
+
+.comparison-section {
+  min-width: 0;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.comparison-insights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.comparison-insight {
+  min-height: 72px;
+  padding: 13px 14px;
+  border-left: 3px solid var(--accent);
+  background: #f8fafc;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.comparison-insight strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 14px;
+}
+
+.comparison-table-wrap,
+.comparison-keyword-table-wrap {
+  max-height: 560px;
+}
+
+.comparison-table-wrap th:not(:first-child),
+.comparison-table-wrap td:not(:first-child),
+.comparison-keyword-table-wrap th:nth-child(n + 3),
+.comparison-keyword-table-wrap td:nth-child(n + 3) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.comparison-table-wrap td:first-child,
+.comparison-keyword-table-wrap td:first-child {
+  width: auto;
+  color: var(--ink);
+}
+
+.comparison-table-wrap td:last-child,
+.comparison-keyword-table-wrap td:last-child {
+  width: auto;
+}
+
+.comparison-period-heading {
+  display: inline-block;
+  min-width: 92px;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.comparison-keyword-heading {
+  align-items: end;
+}
+
+.comparison-filters {
+  display: grid;
+  grid-template-columns: 220px 150px;
+  gap: 10px;
+}
+
+.comparison-filters label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comparison-filters input,
+.comparison-filters select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+
+.comparison-keyword-table-wrap th:first-child {
+  min-width: 150px;
+}
+
+.comparison-keyword-table-wrap th:nth-child(2) {
+  min-width: 110px;
+}
+
+.change-badge {
+  display: inline-block;
+  min-width: 72px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #eef2f6;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.change-badge.positive {
+  background: #eaf7ef;
+  color: #08783f;
+}
+
+.change-badge.negative {
+  background: #fff0ee;
+  color: #b42318;
 }
 
 .mapping-actions {
@@ -455,12 +711,15 @@ td:last-child {
   .summary-band,
   .report-header,
   .trend-header,
-  .mapping-header {
+  .mapping-header,
+  .comparison-header,
+  .section-heading {
     display: grid;
   }
 
   .report-tools,
-  .mapping-actions {
+  .mapping-actions,
+  .comparison-actions {
     display: grid;
   }
 
@@ -474,5 +733,15 @@ td:last-child {
 
   .mapping-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .comparison-summary,
+  .comparison-insights,
+  .comparison-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .comparison-period-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
