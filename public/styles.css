@@ -31,10 +31,9 @@ body {
 .summary-band,
 .month-panel,
 .report-panel,
-.trend-panel,
 .mapping-panel,
 .comparison-panel,
-.new-keywords-panel {
+.category-status-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -299,10 +298,9 @@ button:disabled {
   padding: 20px;
 }
 
-.trend-header,
 .mapping-header,
 .comparison-header,
-.new-keywords-header,
+.category-status-header,
 .section-heading {
   display: flex;
   align-items: start;
@@ -310,10 +308,9 @@ button:disabled {
   gap: 18px;
 }
 
-.trend-header p,
 .mapping-header p,
 .comparison-header p,
-.new-keywords-header p,
+.category-status-header p,
 .section-heading p {
   margin-top: 8px;
   color: var(--muted);
@@ -700,34 +697,50 @@ button:disabled {
   color: #b42318;
 }
 
-.new-keywords-panel {
+.category-status-panel {
   width: 100%;
   min-width: 0;
   padding: 20px;
 }
 
-.new-keywords-actions {
-  display: flex;
-  gap: 10px;
-  white-space: nowrap;
-}
-
-.new-keywords-summary {
+.mapping-summary,
+.category-status-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 18px;
 }
 
-.new-keywords-toolbar {
+.category-manager {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 170px minmax(260px, 1.5fr);
-  gap: 12px;
-  align-items: end;
+  gap: 14px;
   margin-top: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
-.new-keywords-toolbar label {
+.category-manager h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.category-manager p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.category-manager-controls {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(170px, 0.8fr) minmax(240px, 1.2fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.category-manager-controls label,
+.series-picker label,
+.category-keyword-search {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -735,8 +748,11 @@ button:disabled {
   font-weight: 700;
 }
 
-.new-keywords-toolbar input,
-.new-keywords-toolbar select {
+.category-manager-controls input,
+.category-manager-controls select,
+.series-picker input,
+.series-picker select,
+.category-keyword-search input {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -746,22 +762,26 @@ button:disabled {
   font: inherit;
 }
 
-#new-keywords-status {
-  color: var(--muted);
-  font-size: 13px;
+.inline-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
 }
 
-.new-keywords-table-wrap {
-  max-height: 680px;
+.inline-control button {
+  min-width: 40px;
+  padding: 0 11px;
 }
 
-.new-keywords-table-wrap td:first-child {
-  width: auto;
-  color: var(--ink);
+.danger-button {
+  background: #fff5f5;
+  color: #b42318;
+  border: 1px solid #ffd3cf;
 }
 
-.new-keywords-table-wrap td:last-child {
-  width: 280px;
+.danger-button:hover {
+  background: #ffe7e3;
+  color: #8f1b13;
 }
 
 .category-suggestion,
@@ -783,6 +803,246 @@ button:disabled {
 .new-keyword-badge.returning {
   background: #fff7e8;
   color: #8a4b08;
+}
+
+.muted-cell {
+  color: var(--muted);
+}
+
+.rank-trend-section {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.series-picker {
+  display: grid;
+  grid-template-columns: 150px minmax(240px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.selected-series-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 34px;
+  margin-top: 12px;
+}
+
+.selected-series-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #44515e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.selected-series-item button {
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.selected-series-item button:hover {
+  background: #e8edf2;
+  color: var(--ink);
+}
+
+.rank-chart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 14px;
+  align-items: stretch;
+  margin-top: 12px;
+}
+
+.rank-chart-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+#category-rank-chart {
+  display: block;
+  width: 100%;
+  height: 360px;
+}
+
+#category-rank-chart .axis {
+  stroke: #aab5c1;
+}
+
+#category-rank-chart .rank-grid {
+  stroke: #e4e9ef;
+  stroke-width: 1;
+}
+
+#category-rank-chart .axis-label {
+  fill: #526170;
+  font-size: 10px;
+}
+
+#category-rank-chart .chart-empty {
+  fill: var(--muted);
+  font-size: 13px;
+}
+
+.rank-chart-legend {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 12px 0 12px 14px;
+  border-left: 1px solid var(--line);
+}
+
+.rank-legend-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.rank-legend-swatch {
+  width: 12px;
+  height: 3px;
+  margin-top: 7px;
+}
+
+.rank-legend-item strong,
+.rank-legend-item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.rank-legend-item strong {
+  font-size: 12px;
+}
+
+.rank-legend-item small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.category-explorer {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  min-width: 0;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.category-explorer aside {
+  min-width: 0;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+
+.category-explorer-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.category-explorer-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.category-status-list {
+  display: grid;
+  gap: 6px;
+  max-height: 690px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.category-status-button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  color: var(--ink);
+  text-align: left;
+}
+
+.category-status-button:hover,
+.category-status-button.active {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent-strong);
+}
+
+.category-status-button small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.category-detail {
+  min-width: 0;
+  padding-left: 18px;
+}
+
+.category-period-table-wrap {
+  max-height: 300px;
+}
+
+.category-period-table-wrap th:not(:first-child),
+.category-period-table-wrap td:not(:first-child),
+.category-keyword-table-wrap th:last-child,
+.category-keyword-table-wrap td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.category-keyword-search {
+  width: min(380px, 100%);
+  margin-top: 18px;
+}
+
+.category-keyword-table-wrap {
+  max-height: 430px;
+}
+
+.assignment-badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #44515e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assignment-badge.manual {
+  background: #eaf7ef;
+  color: #08783f;
+}
+
+.assignment-badge.unmapped {
+  background: #fff0ee;
+  color: #b42318;
 }
 
 .mapping-actions {
@@ -886,18 +1146,16 @@ td:last-child {
 @media (max-width: 780px) {
   .summary-band,
   .report-header,
-  .trend-header,
   .mapping-header,
   .comparison-header,
-  .new-keywords-header,
+  .category-status-header,
   .section-heading {
     display: grid;
   }
 
   .report-tools,
   .mapping-actions,
-  .comparison-actions,
-  .new-keywords-actions {
+  .comparison-actions {
     display: grid;
   }
 
@@ -927,14 +1185,37 @@ td:last-child {
     grid-template-columns: 1fr;
   }
 
-  .new-keywords-toolbar {
+  .category-manager-controls,
+  .series-picker,
+  .rank-chart-layout,
+  .category-explorer {
     grid-template-columns: 1fr;
+  }
+
+  .category-explorer aside {
+    padding-right: 0;
+    padding-bottom: 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .category-detail {
+    padding-top: 18px;
+    padding-left: 0;
+  }
+
+  .rank-chart-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 
   .comparison-summary,
   .comparison-insights,
   .latest-change-summary,
-  .new-keywords-summary,
+  .mapping-summary,
+  .category-status-summary,
   .comparison-filters {
     grid-template-columns: minmax(0, 1fr);
   }

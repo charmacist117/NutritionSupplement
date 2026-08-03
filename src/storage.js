@@ -185,6 +185,8 @@ async function unlinkIfExists(path) {
 function emptyKeywordCategoryMappings() {
   return {
     updatedAt: null,
+    categories: null,
+    categoryAliases: {},
     mappings: []
   };
 }
@@ -192,6 +194,20 @@ function emptyKeywordCategoryMappings() {
 function normalizeKeywordCategoryMappings(input = {}) {
   const source = Array.isArray(input) ? input : input.mappings;
   const byKeyword = new Map();
+  const categories = Array.isArray(input.categories)
+    ? [...new Set(input.categories.map((item) => String(item || "").trim()).filter(Boolean))]
+    : null;
+  const categoryAliases = {};
+
+  if (input.categoryAliases && typeof input.categoryAliases === "object" && !Array.isArray(input.categoryAliases)) {
+    for (const [from, to] of Object.entries(input.categoryAliases)) {
+      const sourceCategory = String(from || "").trim();
+      const targetCategory = String(to || "").trim();
+      if (sourceCategory && targetCategory && sourceCategory !== targetCategory) {
+        categoryAliases[sourceCategory] = targetCategory;
+      }
+    }
+  }
 
   for (const item of source || []) {
     const keyword = String(item.keyword || "").trim();
@@ -206,6 +222,8 @@ function normalizeKeywordCategoryMappings(input = {}) {
 
   return {
     updatedAt: input.updatedAt || null,
+    categories,
+    categoryAliases,
     mappings: [...byKeyword.values()].sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"))
   };
 }

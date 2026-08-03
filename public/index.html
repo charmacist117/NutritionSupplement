@@ -32,8 +32,8 @@
       <nav class="tab-list" aria-label="대시보드 보기">
         <button class="tab-button active" type="button" data-tab="reports">기간별 리포트</button>
         <button class="tab-button" type="button" data-tab="mapping">키워드 카테고리 매칭</button>
+        <button class="tab-button" type="button" data-tab="category-status">카테고리 현황</button>
         <button class="tab-button" type="button" data-tab="comparison">기간별 비교</button>
-        <button class="tab-button" type="button" data-tab="new-keywords">New Keywords</button>
       </nav>
 
       <div class="tab-view active" data-tab-view="reports">
@@ -78,32 +78,6 @@
           </section>
         </section>
 
-        <section class="trend-panel">
-          <div class="trend-header">
-            <div>
-              <h2>키워드 그룹 추이</h2>
-              <p>한 줄에 하나씩 `그룹명=키워드1,키워드2` 형식으로 입력하면 저장된 기간별 리포트에서 합산 점수와 최고 순위를 비교합니다.</p>
-            </div>
-            <button id="trend-run-button" type="button">추이 보기</button>
-          </div>
-
-          <textarea id="keyword-groups-input" spellcheck="false"></textarea>
-
-          <div class="trend-chart-wrap">
-            <svg id="trend-chart" role="img" aria-label="키워드 그룹 기간별 점수 추이"></svg>
-          </div>
-
-          <div class="table-wrap trend-table-wrap">
-            <table>
-              <thead id="trend-head"></thead>
-              <tbody id="trend-body">
-                <tr>
-                  <td>저장된 기간별 자료가 있으면 추이를 확인할 수 있습니다.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
 
       <section class="mapping-panel tab-view" data-tab-view="mapping">
@@ -113,10 +87,41 @@
             <p>저장된 리포트의 키워드를 불러와 직접 제품군을 지정합니다. 저장한 매칭은 엑셀 다운로드와 카테고리 집계에 우선 적용됩니다.</p>
           </div>
           <div class="mapping-actions">
-            <button id="mapping-refresh-button" type="button">키워드 불러오기</button>
-            <button id="mapping-save-button" type="button">매칭 저장</button>
+            <button id="mapping-refresh-button" class="secondary-button" type="button">새로고침</button>
+            <button id="mapping-apply-suggestions" class="secondary-button" type="button">신규 추천 적용</button>
+            <button id="mapping-save-button" type="button">변경사항 저장</button>
           </div>
         </div>
+
+        <div id="mapping-summary" class="mapping-summary"></div>
+
+        <section class="category-manager" aria-labelledby="category-manager-title">
+          <div>
+            <h3 id="category-manager-title">카테고리 관리</h3>
+            <p>새 제품군을 만들거나 기존 제품군의 이름을 바꾸고 삭제할 수 있습니다.</p>
+          </div>
+          <div class="category-manager-controls">
+            <label>
+              새 카테고리
+              <span class="inline-control">
+                <input id="category-add-input" type="text" placeholder="카테고리 이름">
+                <button id="category-add-button" type="button" aria-label="카테고리 추가" title="카테고리 추가">＋</button>
+              </span>
+            </label>
+            <label>
+              변경할 카테고리
+              <select id="category-manage-select"></select>
+            </label>
+            <label>
+              새 이름
+              <span class="inline-control">
+                <input id="category-rename-input" type="text" placeholder="새 카테고리 이름">
+                <button id="category-rename-button" type="button">이름 변경</button>
+              </span>
+            </label>
+            <button id="category-delete-button" class="danger-button" type="button">삭제</button>
+          </div>
+        </section>
 
         <div class="mapping-toolbar">
           <label>
@@ -126,9 +131,12 @@
           <label>
             보기
             <select id="mapping-filter">
-              <option value="all">전체 키워드</option>
-              <option value="unmapped">미분류만</option>
+              <option value="unmapped" selected>미분류만</option>
+              <option value="new">최신 신규·재진입</option>
+              <option value="first">최초 등장</option>
+              <option value="returning">재진입</option>
               <option value="mapped">분류 완료</option>
+              <option value="all">전체 키워드</option>
             </select>
           </label>
           <p id="mapping-status">저장된 리포트에서 키워드를 불러오면 매칭표가 표시됩니다.</p>
@@ -139,19 +147,101 @@
             <thead>
               <tr>
                 <th>검색어</th>
+                <th>신규 상태</th>
                 <th>최근 기간</th>
                 <th>최근 순위</th>
-                <th>최근 점수</th>
+                <th>자동 추천</th>
                 <th>제품군 카테고리</th>
               </tr>
             </thead>
             <tbody id="mapping-body">
               <tr>
-                <td colspan="5">저장된 리포트에서 키워드를 불러오면 매칭표가 표시됩니다.</td>
+                <td colspan="6">저장된 리포트에서 키워드를 불러오면 매칭표가 표시됩니다.</td>
               </tr>
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="category-status-panel tab-view" data-tab-view="category-status">
+        <div class="category-status-header">
+          <div>
+            <h2>카테고리 정립 현황</h2>
+            <p>저장된 키워드가 어느 제품군에 속하는지, 직접 지정과 자동 규칙을 구분해 확인합니다.</p>
+          </div>
+          <button id="category-status-refresh" class="secondary-button" type="button">새로고침</button>
+        </div>
+
+        <div id="category-status-summary" class="category-status-summary"></div>
+
+        <section class="rank-trend-section">
+          <div class="section-heading">
+            <div>
+              <h2>선택 항목 순위 추이</h2>
+              <p>X축은 저장 자료, Y축은 검색 순위입니다. 카테고리는 해당 제품군 키워드 중 가장 높은 순위로 표시됩니다.</p>
+            </div>
+          </div>
+          <div class="series-picker">
+            <label>
+              종류
+              <select id="status-series-type">
+                <option value="category">카테고리</option>
+                <option value="keyword">키워드</option>
+              </select>
+            </label>
+            <label>
+              찾기
+              <input id="status-series-search" type="search" list="status-series-options" placeholder="카테고리 또는 키워드 검색">
+              <datalist id="status-series-options"></datalist>
+            </label>
+            <button id="status-series-add" type="button">추가</button>
+          </div>
+          <div id="status-series-list" class="selected-series-list"></div>
+          <div class="rank-chart-layout">
+            <div class="rank-chart-wrap">
+              <svg id="category-rank-chart" role="img" aria-label="저장 자료별 카테고리 및 키워드 검색 순위 추이"></svg>
+            </div>
+            <div id="category-rank-legend" class="rank-chart-legend" aria-label="그래프 범례"></div>
+          </div>
+        </section>
+
+        <section class="category-explorer">
+          <aside>
+            <div class="category-explorer-heading">
+              <h2>카테고리</h2>
+              <span id="category-list-count"></span>
+            </div>
+            <div id="category-status-list" class="category-status-list"></div>
+          </aside>
+          <div class="category-detail">
+            <div class="section-heading">
+              <div>
+                <h2 id="category-detail-title">카테고리 선택</h2>
+                <p id="category-detail-meta"></p>
+              </div>
+            </div>
+            <div class="table-wrap category-period-table-wrap">
+              <table>
+                <thead>
+                  <tr><th>저장 자료</th><th>최고 순위</th><th>Top 100</th><th>Top 500</th></tr>
+                </thead>
+                <tbody id="category-period-body"></tbody>
+              </table>
+            </div>
+            <label class="category-keyword-search">
+              하부 키워드 검색
+              <input id="category-keyword-search" type="search" placeholder="키워드 검색">
+            </label>
+            <div class="table-wrap category-keyword-table-wrap">
+              <table>
+                <thead>
+                  <tr><th>키워드</th><th>적용 방식</th><th>최근 기간</th><th>최근 순위</th></tr>
+                </thead>
+                <tbody id="category-keyword-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section class="comparison-panel tab-view" data-tab-view="comparison">
@@ -272,56 +362,6 @@
         </section>
       </section>
 
-      <section class="new-keywords-panel tab-view" data-tab-view="new-keywords">
-        <div class="new-keywords-header">
-          <div>
-            <h2>New Keywords</h2>
-            <p id="new-keywords-period">최신 저장 자료와 바로 이전 자료를 비교해 새로 나타난 검색어를 정리합니다.</p>
-          </div>
-          <div class="new-keywords-actions">
-            <button id="new-keywords-refresh" class="secondary-button" type="button">새로고침</button>
-            <button id="new-keywords-apply-suggestions" class="secondary-button" type="button">추천 일괄 적용</button>
-            <button id="new-keywords-save" type="button">카테고리 저장</button>
-          </div>
-        </div>
-
-        <div id="new-keywords-summary" class="new-keywords-summary"></div>
-
-        <div class="new-keywords-toolbar">
-          <label>
-            검색
-            <input id="new-keywords-search" type="search" placeholder="검색어 또는 제품군">
-          </label>
-          <label>
-            보기
-            <select id="new-keywords-filter">
-              <option value="unmapped" selected>미분류만</option>
-              <option value="all">전체 신규 키워드</option>
-              <option value="mapped">분류 완료</option>
-              <option value="first">최초 등장</option>
-              <option value="returning">재진입</option>
-            </select>
-          </label>
-          <p id="new-keywords-status">저장된 자료를 불러오면 신규 키워드가 표시됩니다.</p>
-        </div>
-
-        <div class="table-wrap new-keywords-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>검색어</th>
-                <th>최신 순위</th>
-                <th>등장 상태</th>
-                <th>자동 추천</th>
-                <th>제품군 카테고리</th>
-              </tr>
-            </thead>
-            <tbody id="new-keywords-body">
-              <tr><td colspan="5">저장된 자료를 불러오면 신규 키워드가 표시됩니다.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </main>
 
     <script src="/app.js" type="module"></script>

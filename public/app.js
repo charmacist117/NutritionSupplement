@@ -11,19 +11,38 @@ const startDateInput = document.querySelector("#start-date");
 const endDateInput = document.querySelector("#end-date");
 const saveReportButton = document.querySelector("#save-report-button");
 const downloadButton = document.querySelector("#download-button");
-const keywordGroupsInput = document.querySelector("#keyword-groups-input");
-const trendRunButton = document.querySelector("#trend-run-button");
-const trendHead = document.querySelector("#trend-head");
-const trendBody = document.querySelector("#trend-body");
-const trendChart = document.querySelector("#trend-chart");
 const tabButtons = [...document.querySelectorAll("[data-tab]")];
 const tabViews = [...document.querySelectorAll("[data-tab-view]")];
 const mappingRefreshButton = document.querySelector("#mapping-refresh-button");
+const mappingApplySuggestionsButton = document.querySelector("#mapping-apply-suggestions");
 const mappingSaveButton = document.querySelector("#mapping-save-button");
+const mappingSummary = document.querySelector("#mapping-summary");
 const mappingSearch = document.querySelector("#mapping-search");
 const mappingFilter = document.querySelector("#mapping-filter");
 const mappingStatus = document.querySelector("#mapping-status");
 const mappingBody = document.querySelector("#mapping-body");
+const categoryAddInput = document.querySelector("#category-add-input");
+const categoryAddButton = document.querySelector("#category-add-button");
+const categoryManageSelect = document.querySelector("#category-manage-select");
+const categoryRenameInput = document.querySelector("#category-rename-input");
+const categoryRenameButton = document.querySelector("#category-rename-button");
+const categoryDeleteButton = document.querySelector("#category-delete-button");
+const categoryStatusRefreshButton = document.querySelector("#category-status-refresh");
+const categoryStatusSummary = document.querySelector("#category-status-summary");
+const statusSeriesType = document.querySelector("#status-series-type");
+const statusSeriesSearch = document.querySelector("#status-series-search");
+const statusSeriesOptions = document.querySelector("#status-series-options");
+const statusSeriesAddButton = document.querySelector("#status-series-add");
+const statusSeriesList = document.querySelector("#status-series-list");
+const categoryRankChart = document.querySelector("#category-rank-chart");
+const categoryRankLegend = document.querySelector("#category-rank-legend");
+const categoryListCount = document.querySelector("#category-list-count");
+const categoryStatusList = document.querySelector("#category-status-list");
+const categoryDetailTitle = document.querySelector("#category-detail-title");
+const categoryDetailMeta = document.querySelector("#category-detail-meta");
+const categoryPeriodBody = document.querySelector("#category-period-body");
+const categoryKeywordSearch = document.querySelector("#category-keyword-search");
+const categoryKeywordBody = document.querySelector("#category-keyword-body");
 const comparisonSelectAllButton = document.querySelector("#comparison-select-all");
 const comparisonClearButton = document.querySelector("#comparison-clear");
 const comparisonEmailCopyButton = document.querySelector("#comparison-email-copy");
@@ -44,17 +63,7 @@ const comparisonKeywordFilter = document.querySelector("#comparison-keyword-filt
 const comparisonKeywordStatus = document.querySelector("#comparison-keyword-status");
 const comparisonKeywordHead = document.querySelector("#comparison-keyword-head");
 const comparisonKeywordBody = document.querySelector("#comparison-keyword-body");
-const newKeywordsPeriod = document.querySelector("#new-keywords-period");
-const newKeywordsRefreshButton = document.querySelector("#new-keywords-refresh");
-const newKeywordsApplySuggestionsButton = document.querySelector("#new-keywords-apply-suggestions");
-const newKeywordsSaveButton = document.querySelector("#new-keywords-save");
-const newKeywordsSummary = document.querySelector("#new-keywords-summary");
-const newKeywordsSearch = document.querySelector("#new-keywords-search");
-const newKeywordsFilter = document.querySelector("#new-keywords-filter");
-const newKeywordsStatus = document.querySelector("#new-keywords-status");
-const newKeywordsBody = document.querySelector("#new-keywords-body");
-const PRODUCT_GROUPS = [
-  "총합계",
+const DEFAULT_PRODUCT_CATEGORIES = [
   "오메가3",
   "마그네슘",
   "유산균",
@@ -97,20 +106,10 @@ const PRODUCT_GROUPS = [
   "구강 건강",
   "기타"
 ];
-const DEFAULT_KEYWORD_GROUPS = [
-  "오메가3=오메가3,오메가",
-  "마그네슘=마그네슘,마그네슘추천",
-  "BNR17=bnr17,bnr,비에날17,비엔알17,비에날,비엔알",
-  "콘드로이친=콘드로이친,콘드로이친1200",
-  "루테인=루테인",
-  "유산균=유산균,락토핏,프로바이오틱스",
-  "뉴케어=뉴케어",
-  "비타민C=비타민c,비타민씨",
-  "관절=관절,MSM,msm,보스웰리아,호관원"
-];
 const REPORT_ORDER_STORAGE_KEY = "reportOrder";
 const COMPARISON_SELECTION_STORAGE_KEY = "comparisonReportSelection";
 const COMPARISON_MODE_STORAGE_KEY = "comparisonMode";
+const CATEGORY_TREND_SELECTION_STORAGE_KEY = "categoryTrendSelection";
 const LATEST_RANK_CHANGE_THRESHOLD = 50;
 const MISSING_MONTH_RANK = 501;
 const COMPARISON_MODES = {
@@ -125,7 +124,14 @@ let currentReport = null;
 let reportKeys = [];
 let reportCache = new Map();
 let categoryMappings = new Map();
+let productCategories = [...DEFAULT_PRODUCT_CATEGORIES];
+let categoryAliases = new Map();
 let mappingRows = [];
+let newKeywordRows = [];
+let categoryStatusReports = [];
+let categoryStatusRows = [];
+let selectedStatusCategory = "";
+let selectedTrendSeries = readTrendSeriesSelection();
 let draggedReportKey = null;
 let comparisonSelectionLoaded = false;
 let comparisonSelectedKeys = new Set();
@@ -134,14 +140,12 @@ let comparisonCategoryRows = [];
 let comparisonKeywordRows = [];
 let comparisonLatestChanges = [];
 let comparisonMode = readComparisonMode();
-let newKeywordRows = [];
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
 };
 
 setPreviousMonthDates();
-keywordGroupsInput.value = localStorage.getItem("keywordGroups") || DEFAULT_KEYWORD_GROUPS.join("\n");
 updateComparisonModeButtons();
 
 for (const button of tabButtons) {
@@ -169,14 +173,11 @@ saveReportButton.addEventListener("click", async () => {
   await saveCurrentReport();
 });
 
-trendRunButton.addEventListener("click", async () => {
-  localStorage.setItem("keywordGroups", keywordGroupsInput.value);
-  await renderTrendDashboard();
-});
-
 mappingRefreshButton.addEventListener("click", async () => {
   await renderMappingSheet({ refreshReports: true });
 });
+
+mappingApplySuggestionsButton.addEventListener("click", () => applyNewKeywordSuggestions());
 
 mappingSaveButton.addEventListener("click", async () => {
   await saveCategoryMappingsFromSheet();
@@ -184,6 +185,32 @@ mappingSaveButton.addEventListener("click", async () => {
 
 mappingSearch.addEventListener("input", () => renderMappingRows());
 mappingFilter.addEventListener("change", () => renderMappingRows());
+
+categoryAddButton.addEventListener("click", () => addProductCategory());
+categoryAddInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addProductCategory();
+  }
+});
+categoryManageSelect.addEventListener("change", () => {
+  categoryRenameInput.value = categoryManageSelect.value;
+});
+categoryRenameButton.addEventListener("click", () => renameProductCategory());
+categoryDeleteButton.addEventListener("click", () => deleteProductCategory());
+
+categoryStatusRefreshButton.addEventListener("click", async () => {
+  await renderCategoryStatusSheet({ refreshReports: true });
+});
+statusSeriesType.addEventListener("change", () => updateStatusSeriesOptions());
+statusSeriesSearch.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addTrendSeries();
+  }
+});
+statusSeriesAddButton.addEventListener("click", () => addTrendSeries());
+categoryKeywordSearch.addEventListener("input", () => renderCategoryKeywordRows());
 
 comparisonSelectAllButton.addEventListener("click", async () => {
   comparisonSelectedKeys = new Set(reportKeys);
@@ -224,15 +251,6 @@ for (const button of comparisonModeButtons) {
     await renderComparisonSheet();
   });
 }
-
-newKeywordsRefreshButton.addEventListener("click", async () => {
-  await renderNewKeywordsSheet({ refreshReports: true });
-});
-
-newKeywordsApplySuggestionsButton.addEventListener("click", () => applyNewKeywordSuggestions());
-newKeywordsSaveButton.addEventListener("click", () => saveNewKeywordMappings());
-newKeywordsSearch.addEventListener("input", () => renderNewKeywordRows());
-newKeywordsFilter.addEventListener("change", () => renderNewKeywordRows());
 
 collectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -309,10 +327,9 @@ async function loadMonths(preferredMonth = null) {
   if (!months.length) {
     monthList.innerHTML = `<p class="empty">아직 저장된 자료가 없습니다.</p>`;
     clearReportView();
-    await renderTrendDashboard();
     if (activeTab() === "mapping") await renderMappingSheet();
+    if (activeTab() === "category-status") await renderCategoryStatusSheet();
     if (activeTab() === "comparison") await renderComparisonSheet();
-    if (activeTab() === "new-keywords") await renderNewKeywordsSheet();
     if (!collectButton.disabled && healthState.blobConfigured) {
       statusText.textContent = "날짜를 선택한 뒤 수집을 실행하면 자료가 생성됩니다.";
     }
@@ -323,10 +340,9 @@ async function loadMonths(preferredMonth = null) {
 
   const nextMonth = preferredMonth && reportKeys.includes(preferredMonth) ? preferredMonth : reportKeys[0];
   await loadReport(nextMonth);
-  await renderTrendDashboard();
   if (activeTab() === "mapping") await renderMappingSheet();
+  if (activeTab() === "category-status") await renderCategoryStatusSheet();
   if (activeTab() === "comparison") await renderComparisonSheet();
-  if (activeTab() === "new-keywords") await renderNewKeywordsSheet();
 }
 
 function renderMonthList() {
@@ -376,8 +392,8 @@ async function setActiveTab(tab) {
   }
 
   if (tab === "mapping") await renderMappingSheet();
+  if (tab === "category-status") await renderCategoryStatusSheet();
   if (tab === "comparison") await renderComparisonSheet();
-  if (tab === "new-keywords") await renderNewKeywordsSheet();
 }
 
 function activeTab() {
@@ -492,6 +508,7 @@ async function deleteReport(month) {
 
     await loadMonths(nextMonth);
     if (activeTab() === "mapping") await renderMappingSheet({ refreshReports: true });
+    if (activeTab() === "category-status") await renderCategoryStatusSheet({ refreshReports: true });
     if (activeTab() === "comparison") await renderComparisonSheet({ refreshReports: true });
     statusText.textContent = `${label} 리포트를 삭제했습니다.`;
   } catch (error) {
@@ -551,8 +568,8 @@ async function handleReportDrop(event) {
   if (!moveReportKey(sourceKey, targetKey, position)) return;
 
   statusText.textContent = "저장 자료 순서를 변경했습니다.";
-  await renderTrendDashboard();
   if (activeTab() === "mapping") await renderMappingSheet();
+  if (activeTab() === "category-status") await renderCategoryStatusSheet();
 }
 
 function handleReportDragEnd() {
@@ -621,6 +638,7 @@ function storageErrorMessage(storage) {
 async function downloadReportXlsx(report) {
   const rows = report.rows || [];
   const currentScoreByGroup = scoreByProductGroup(rows);
+  const aggregateCategories = productGroupsWithTotal();
   const xlsxRows = [
     [
       "순위",
@@ -639,8 +657,8 @@ async function downloadReportXlsx(report) {
       productCategoryFor(row.keyword),
       targetCategoryFor(row.keyword),
       "",
-      PRODUCT_GROUPS[index] || "",
-      PRODUCT_GROUPS[index] ? roundScore(currentScoreByGroup.get(PRODUCT_GROUPS[index]) || 0) : ""
+      aggregateCategories[index] || "",
+      aggregateCategories[index] ? roundScore(currentScoreByGroup.get(aggregateCategories[index]) || 0) : ""
     ])
   ];
   const blob = createXlsxBlob("기간별 리포트", xlsxRows);
@@ -652,39 +670,6 @@ async function downloadReportXlsx(report) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-}
-
-async function renderTrendDashboard() {
-  const groups = parseKeywordGroups(keywordGroupsInput.value);
-  const reports = await loadAllReports();
-
-  if (!groups.length || !reports.length) {
-    trendChart.replaceChildren();
-    trendHead.innerHTML = "";
-    trendBody.innerHTML = `<tr><td>그룹 정의와 저장된 기간별 자료가 필요합니다.</td></tr>`;
-    return;
-  }
-
-  const months = reports.map((item) => periodLabel(item));
-  const matrix = groups.map((group) => {
-    const points = reports.map((report) => summarizeGroup(report, group));
-    const latest = points[points.length - 1] || { score: 0, rank: null };
-    const previous = points[points.length - 2] || { score: 0, rank: null };
-
-    return {
-      ...group,
-      points,
-      latestScore: latest.score,
-      previousScore: previous.score,
-      scoreDelta: latest.score - previous.score,
-      latestRank: latest.rank,
-      previousRank: previous.rank,
-      rankDelta: previous.rank && latest.rank ? previous.rank - latest.rank : null
-    };
-  });
-
-  renderTrendTable(months, matrix);
-  renderTrendChart(months, matrix);
 }
 
 async function loadAllReports() {
@@ -739,20 +724,36 @@ async function loadCategoryMappings() {
 
 function setCategoryMappings(data) {
   categoryMappings = new Map();
+  categoryAliases = new Map(
+    Object.entries(data?.categoryAliases || {})
+      .map(([from, to]) => [String(from || "").trim(), String(to || "").trim()])
+      .filter(([from, to]) => from && to && from !== to)
+  );
+  productCategories = normalizeProductCategoryList(
+    Array.isArray(data?.categories) ? data.categories : DEFAULT_PRODUCT_CATEGORIES
+  );
 
   for (const item of data?.mappings || []) {
     const keyword = String(item.keyword || "").trim();
-    const category = String(item.category || "").trim();
+    const category = resolveCategoryName(String(item.category || "").trim());
     if (!keyword || !category) continue;
+    if (!productCategories.includes(category) && category !== "미지정") productCategories.push(category);
     categoryMappings.set(normalizeText(keyword), { keyword, category });
   }
+
+  if (!productCategories.length) productCategories = [...DEFAULT_PRODUCT_CATEGORIES];
+  updateCategoryManagerOptions();
 }
 
 async function renderMappingSheet(options = {}) {
+  updateCategoryManagerOptions();
   if (!reportKeys.length) {
     mappingRows = [];
+    newKeywordRows = [];
+    renderMappingSummary();
     mappingStatus.textContent = "저장된 리포트가 없어 매칭할 키워드가 없습니다.";
-    mappingBody.innerHTML = `<tr><td colspan="5">저장된 리포트가 없습니다.</td></tr>`;
+    mappingBody.innerHTML = `<tr><td colspan="6">저장된 리포트가 없습니다.</td></tr>`;
+    mappingApplySuggestionsButton.disabled = true;
     return;
   }
 
@@ -761,15 +762,19 @@ async function renderMappingSheet(options = {}) {
     if (options.refreshReports) reportCache = new Map();
 
     const reports = await loadAllReports();
+    newKeywordRows = reports.length >= 2 ? buildNewKeywordRows(reports) : [];
     mappingRows = buildMappingRows(reports);
+    renderMappingSummary();
     renderMappingRows();
   } finally {
     mappingRefreshButton.disabled = false;
+    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
   }
 }
 
 function buildMappingRows(reports) {
   const byKeyword = new Map();
+  const appearanceByKeyword = new Map(newKeywordRows.map((row) => [row.key, row.appearanceType]));
 
   for (const report of reports) {
     for (const row of report.rows || []) {
@@ -783,7 +788,7 @@ function buildMappingRows(reports) {
         latestMonth: "",
         latestEndDate: "",
         latestRank: null,
-        latestScore: 0
+        appearanceType: appearanceByKeyword.get(key) || ""
       };
       const endDate = reportEndDate(report);
 
@@ -793,7 +798,6 @@ function buildMappingRows(reports) {
         existing.latestMonth = report.month;
         existing.latestEndDate = endDate;
         existing.latestRank = row.rank;
-        existing.latestScore = Number(row.dailyAverageRatio || 0);
       }
 
       byKeyword.set(key, existing);
@@ -807,22 +811,41 @@ function buildMappingRows(reports) {
   });
 }
 
+function renderMappingSummary() {
+  const firstCount = newKeywordRows.filter((row) => row.appearanceType === "first").length;
+  const returningCount = newKeywordRows.filter((row) => row.appearanceType === "returning").length;
+  const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
+
+  mappingSummary.innerHTML = [
+    comparisonMetricHtml("전체 키워드", `${mappingRows.length}개`, "저장 자료 전체의 고유 검색어"),
+    comparisonMetricHtml("최초 등장", `${firstCount}개`, "최신 자료에 처음 나타난 검색어"),
+    comparisonMetricHtml("재진입", `${returningCount}개`, "직전 자료에서 빠졌다가 다시 나타난 검색어"),
+    comparisonMetricHtml("직접 분류 / 카테고리", `${mappedCount} / ${productCategories.length}`, "저장된 직접 매칭과 제품군 수")
+  ].join("");
+}
+
 function renderMappingRows() {
   const search = normalizeText(mappingSearch.value);
   const filter = mappingFilter.value;
   const rows = mappingRows.filter((row) => {
-    const mapped = Boolean(manualCategoryFor(row.keyword));
+    const manualCategory = manualCategoryFor(row.keyword);
+    const suggestion = autoProductCategoryFor(row.keyword);
+    const mapped = Boolean(manualCategory);
     if (filter === "mapped" && !mapped) return false;
     if (filter === "unmapped" && mapped) return false;
-    return !search || normalizeText(row.keyword).includes(search);
+    if (filter === "new" && !row.appearanceType) return false;
+    if ((filter === "first" || filter === "returning") && row.appearanceType !== filter) return false;
+    return !search
+      || normalizeText(row.keyword).includes(search)
+      || normalizeText(manualCategory || suggestion).includes(search);
   });
   const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
 
-  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 매칭 완료 ${mappedCount}개`;
+  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 직접 분류 ${mappedCount}개 · 신규·재진입 ${newKeywordRows.length}개`;
   mappingBody.replaceChildren();
 
   if (!rows.length) {
-    mappingBody.innerHTML = `<tr><td colspan="5">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    mappingBody.innerHTML = `<tr><td colspan="6">조건에 맞는 키워드가 없습니다.</td></tr>`;
     return;
   }
 
@@ -830,19 +853,21 @@ function renderMappingRows() {
   for (const row of rows) {
     const tr = document.createElement("tr");
     const keywordCell = document.createElement("td");
+    const appearanceCell = document.createElement("td");
     const monthCell = document.createElement("td");
     const rankCell = document.createElement("td");
-    const scoreCell = document.createElement("td");
+    const suggestionCell = document.createElement("td");
     const categoryCell = document.createElement("td");
     const select = createCategorySelect(row.keyword);
 
     keywordCell.textContent = row.keyword;
+    appearanceCell.innerHTML = row.appearanceType ? newKeywordAppearanceBadge(row.appearanceType) : `<span class="muted-cell">-</span>`;
     monthCell.textContent = row.latestMonth || "-";
     rankCell.textContent = row.latestRank || "-";
-    scoreCell.textContent = formatScore(row.latestScore);
+    suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(autoProductCategoryFor(row.keyword))}</span>`;
     categoryCell.append(select);
 
-    tr.append(keywordCell, monthCell, rankCell, scoreCell, categoryCell);
+    tr.append(keywordCell, appearanceCell, monthCell, rankCell, suggestionCell, categoryCell);
     fragment.append(tr);
   }
 
@@ -859,7 +884,7 @@ function createCategorySelect(keyword, onChange = null) {
   emptyOption.textContent = "미지정";
   select.append(emptyOption);
 
-  for (const category of PRODUCT_GROUPS.filter((item) => item !== "총합계")) {
+  for (const category of productCategories) {
     const option = document.createElement("option");
     option.value = category;
     option.textContent = category;
@@ -874,8 +899,10 @@ function createCategorySelect(keyword, onChange = null) {
       return;
     }
 
+    renderMappingSummary();
     const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
-    mappingStatus.textContent = `총 ${mappingRows.length}개 · 매칭 완료 ${mappedCount}개 · 저장 필요`;
+    mappingStatus.textContent = `총 ${mappingRows.length}개 · 직접 분류 ${mappedCount}개 · 저장 필요`;
+    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
   });
 
   return select;
@@ -902,8 +929,9 @@ async function saveCategoryMappingsFromSheet() {
 
   try {
     const saved = await persistCategoryMappings();
+    renderMappingSummary();
     renderMappingRows();
-    mappingStatus.textContent = `${saved.mappings.length}개 키워드 매칭을 저장했습니다.`;
+    mappingStatus.textContent = `${saved.categories.length}개 카테고리와 ${saved.mappings.length}개 키워드 매칭을 저장했습니다.`;
   } catch (error) {
     mappingStatus.textContent = error.message;
   } finally {
@@ -918,7 +946,11 @@ async function persistCategoryMappings() {
   const response = await fetch("/api/keyword-category-mappings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mappings })
+    body: JSON.stringify({
+      categories: productCategories,
+      categoryAliases: Object.fromEntries(categoryAliases),
+      mappings
+    })
   });
   const saved = await response.json();
 
@@ -930,8 +962,127 @@ async function persistCategoryMappings() {
   return saved;
 }
 
+function normalizeProductCategoryList(categories) {
+  const unique = new Map();
+  for (const item of categories || []) {
+    const category = String(item || "").trim();
+    if (!category || category === "총합계" || category === "미지정") continue;
+    unique.set(normalizeText(category), category);
+  }
+  return [...unique.values()];
+}
+
+function productGroupsWithTotal() {
+  return ["총합계", ...productCategories];
+}
+
+function resolveCategoryName(value) {
+  let category = String(value || "").trim();
+  const visited = new Set();
+
+  while (categoryAliases.has(category) && !visited.has(category)) {
+    visited.add(category);
+    category = categoryAliases.get(category);
+  }
+
+  return category;
+}
+
+function updateCategoryManagerOptions(preferredCategory = "") {
+  const current = preferredCategory || categoryManageSelect.value;
+  categoryManageSelect.replaceChildren();
+
+  for (const category of productCategories) {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    categoryManageSelect.append(option);
+  }
+
+  categoryManageSelect.value = productCategories.includes(current) ? current : productCategories[0] || "";
+  categoryRenameInput.value = categoryManageSelect.value;
+  categoryRenameButton.disabled = !productCategories.length;
+  categoryDeleteButton.disabled = productCategories.length <= 1;
+}
+
+function addProductCategory() {
+  const category = String(categoryAddInput.value || "").trim();
+  if (!category) {
+    mappingStatus.textContent = "추가할 카테고리 이름을 입력해주세요.";
+    categoryAddInput.focus();
+    return;
+  }
+  if (["총합계", "미지정"].includes(category) || productCategories.some((item) => normalizeText(item) === normalizeText(category))) {
+    mappingStatus.textContent = "이미 사용 중이거나 예약된 카테고리 이름입니다.";
+    return;
+  }
+
+  productCategories.push(category);
+  categoryAddInput.value = "";
+  updateCategoryManagerOptions(category);
+  renderMappingSummary();
+  renderMappingRows();
+  mappingStatus.textContent = `${category} 카테고리를 추가했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+}
+
+function renameProductCategory() {
+  const previous = categoryManageSelect.value;
+  const next = String(categoryRenameInput.value || "").trim();
+  if (!previous || !next || previous === next) return;
+  if (["총합계", "미지정"].includes(next) || productCategories.some((item) => item !== previous && normalizeText(item) === normalizeText(next))) {
+    mappingStatus.textContent = "이미 사용 중이거나 예약된 카테고리 이름입니다.";
+    return;
+  }
+
+  productCategories = productCategories.map((category) => category === previous ? next : category);
+  for (const [key, item] of categoryMappings) {
+    if (resolveCategoryName(item.category) === previous) categoryMappings.set(key, { ...item, category: next });
+  }
+  for (const [source, target] of categoryAliases) {
+    if (target === previous) categoryAliases.set(source, next);
+  }
+  categoryAliases.set(previous, next);
+  selectedTrendSeries = selectedTrendSeries.map((series) => (
+    series.type === "category" && series.value === previous ? { ...series, value: next } : series
+  ));
+  if (selectedStatusCategory === previous) selectedStatusCategory = next;
+
+  saveTrendSeriesSelection();
+  updateCategoryManagerOptions(next);
+  renderMappingSummary();
+  renderMappingRows();
+  mappingStatus.textContent = `${previous}을(를) ${next}(으)로 변경했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+}
+
+function deleteProductCategory() {
+  const category = categoryManageSelect.value;
+  if (!category || productCategories.length <= 1) return;
+  const mappedCount = [...categoryMappings.values()].filter((item) => resolveCategoryName(item.category) === category).length;
+  const confirmed = window.confirm(
+    `${category} 카테고리를 삭제할까요?\n직접 지정된 ${mappedCount}개 키워드는 미지정 상태로 바뀝니다.`
+  );
+  if (!confirmed) return;
+
+  productCategories = productCategories.filter((item) => item !== category);
+  for (const [key, item] of categoryMappings) {
+    if (resolveCategoryName(item.category) === category) categoryMappings.delete(key);
+  }
+  for (const [source, target] of [...categoryAliases]) {
+    if (source === category || target === category) categoryAliases.delete(source);
+  }
+  selectedTrendSeries = selectedTrendSeries.filter((series) => series.type !== "category" || series.value !== category);
+  if (selectedStatusCategory === category) selectedStatusCategory = productCategories[0] || "";
+
+  saveTrendSeriesSelection();
+  updateCategoryManagerOptions();
+  renderMappingSummary();
+  renderMappingRows();
+  mappingStatus.textContent = `${category} 카테고리를 삭제했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+}
+
 function manualCategoryFor(keyword) {
-  return categoryMappings.get(normalizeText(keyword))?.category || "";
+  const category = resolveCategoryName(categoryMappings.get(normalizeText(keyword))?.category || "");
+  return productCategories.includes(category) ? category : "";
 }
 
 function productCategoryFor(keyword) {
@@ -939,6 +1090,12 @@ function productCategoryFor(keyword) {
 }
 
 function autoProductCategoryFor(keyword) {
+  const category = resolveCategoryName(baseAutoProductCategoryFor(keyword));
+  if (productCategories.includes(category)) return category;
+  return productCategories.includes("기타") ? "기타" : "미지정";
+}
+
+function baseAutoProductCategoryFor(keyword) {
   const kw = normalizeText(keyword);
   const has = (term) => kw.includes(normalizeText(term));
   const any = (terms) => terms.some(has);
@@ -1004,7 +1161,7 @@ function targetCategoryFor(keyword) {
 }
 
 function scoreByProductGroup(rows) {
-  const scores = new Map(PRODUCT_GROUPS.map((group) => [group, 0]));
+  const scores = new Map(productGroupsWithTotal().map((group) => [group, 0]));
 
   for (const row of rows || []) {
     const score = Number(row.dailyAverageRatio || 0);
@@ -1014,42 +1171,6 @@ function scoreByProductGroup(rows) {
   }
 
   return scores;
-}
-
-async function renderNewKeywordsSheet(options = {}) {
-  newKeywordsRefreshButton.disabled = true;
-  newKeywordsApplySuggestionsButton.disabled = true;
-  newKeywordsSaveButton.disabled = true;
-
-  try {
-    if (options.refreshReports) reportCache = new Map();
-    const reports = await loadAllReports();
-
-    if (reports.length < 2) {
-      newKeywordRows = [];
-      newKeywordsPeriod.textContent = "최신 자료와 비교할 바로 이전 저장 자료가 필요합니다.";
-      newKeywordsSummary.replaceChildren();
-      newKeywordsStatus.textContent = "저장 자료가 2개 이상 있어야 신규 키워드를 확인할 수 있습니다.";
-      newKeywordsBody.innerHTML = `<tr><td colspan="5">비교할 저장 자료가 부족합니다.</td></tr>`;
-      return;
-    }
-
-    const previous = reports[reports.length - 2];
-    const latest = reports[reports.length - 1];
-    newKeywordRows = buildNewKeywordRows(reports);
-    newKeywordsPeriod.textContent = `${periodLabel(previous)} 대비 ${periodLabel(latest)}`;
-    renderNewKeywordSummary();
-    renderNewKeywordRows();
-    newKeywordsSaveButton.disabled = false;
-  } catch (error) {
-    newKeywordRows = [];
-    newKeywordsSummary.replaceChildren();
-    newKeywordsStatus.textContent = error.message || "신규 키워드를 불러오지 못했습니다.";
-    newKeywordsBody.innerHTML = `<tr><td colspan="5">신규 키워드를 불러오지 못했습니다.</td></tr>`;
-  } finally {
-    newKeywordsRefreshButton.disabled = false;
-    newKeywordsApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
-  }
 }
 
 function buildNewKeywordRows(reports) {
@@ -1078,68 +1199,6 @@ function buildNewKeywordRows(reports) {
     .sort((a, b) => a.rank - b.rank || a.keyword.localeCompare(b.keyword, "ko"));
 }
 
-function renderNewKeywordSummary() {
-  const firstCount = newKeywordRows.filter((row) => row.appearanceType === "first").length;
-  const returningCount = newKeywordRows.filter((row) => row.appearanceType === "returning").length;
-  const mappedCount = newKeywordRows.filter((row) => manualCategoryFor(row.keyword)).length;
-  const unmappedCount = newKeywordRows.length - mappedCount;
-
-  newKeywordsSummary.innerHTML = [
-    comparisonMetricHtml("신규·재진입 합계", `${newKeywordRows.length}개`, "직전 저장 자료에 없던 검색어"),
-    comparisonMetricHtml("최초 등장", `${firstCount}개`, "과거 저장 자료에도 없던 검색어"),
-    comparisonMetricHtml("재진입", `${returningCount}개`, "과거에는 있었으나 직전 기간에는 없던 검색어"),
-    comparisonMetricHtml("분류 완료 / 미분류", `${mappedCount} / ${unmappedCount}`, "직접 저장한 제품군 카테고리 기준")
-  ].join("");
-}
-
-function renderNewKeywordRows() {
-  const search = normalizeText(newKeywordsSearch.value);
-  const filter = newKeywordsFilter.value;
-  const rows = newKeywordRows.filter((row) => {
-    const manualCategory = manualCategoryFor(row.keyword);
-    const mapped = Boolean(manualCategory);
-    if (filter === "mapped" && !mapped) return false;
-    if (filter === "unmapped" && mapped) return false;
-    if ((filter === "first" || filter === "returning") && row.appearanceType !== filter) return false;
-    return !search
-      || normalizeText(row.keyword).includes(search)
-      || normalizeText(manualCategory || row.suggestion).includes(search);
-  });
-  const mappedCount = newKeywordRows.filter((row) => manualCategoryFor(row.keyword)).length;
-
-  newKeywordsStatus.textContent = `신규·재진입 ${newKeywordRows.length}개 중 ${rows.length}개 표시 · 분류 완료 ${mappedCount}개`;
-  if (!rows.length) {
-    newKeywordsBody.innerHTML = `<tr><td colspan="5">조건에 맞는 신규 키워드가 없습니다.</td></tr>`;
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    const keywordCell = document.createElement("td");
-    const rankCell = document.createElement("td");
-    const typeCell = document.createElement("td");
-    const suggestionCell = document.createElement("td");
-    const categoryCell = document.createElement("td");
-    const select = createCategorySelect(row.keyword, () => {
-      renderNewKeywordSummary();
-      const currentMappedCount = newKeywordRows.filter((item) => manualCategoryFor(item.keyword)).length;
-      newKeywordsStatus.textContent = `신규·재진입 ${newKeywordRows.length}개 · 분류 완료 ${currentMappedCount}개 · 저장 필요`;
-      newKeywordsApplySuggestionsButton.disabled = !newKeywordRows.some((item) => !manualCategoryFor(item.keyword));
-    });
-
-    keywordCell.innerHTML = `<strong>${escapeHtml(row.keyword)}</strong>`;
-    rankCell.textContent = row.rank;
-    typeCell.innerHTML = newKeywordAppearanceBadge(row.appearanceType);
-    suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(row.suggestion)}</span>`;
-    categoryCell.append(select);
-    tr.append(keywordCell, rankCell, typeCell, suggestionCell, categoryCell);
-    fragment.append(tr);
-  }
-
-  newKeywordsBody.replaceChildren(fragment);
-}
-
 function newKeywordAppearanceBadge(type) {
   const label = type === "returning" ? "재진입" : "최초 등장";
   return `<span class="new-keyword-badge ${type}">${label}</span>`;
@@ -1153,27 +1212,391 @@ function applyNewKeywordSuggestions() {
     appliedCount += 1;
   }
 
-  newKeywordsFilter.value = "all";
-  renderNewKeywordSummary();
-  renderNewKeywordRows();
-  newKeywordsStatus.textContent = `${appliedCount}개 키워드에 자동 추천을 적용했습니다. 카테고리 저장을 눌러 확정해주세요.`;
-  newKeywordsApplySuggestionsButton.disabled = true;
+  mappingFilter.value = "new";
+  renderMappingSummary();
+  renderMappingRows();
+  mappingStatus.textContent = `${appliedCount}개 신규·재진입 키워드에 자동 추천을 적용했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  mappingApplySuggestionsButton.disabled = true;
 }
 
-async function saveNewKeywordMappings() {
-  newKeywordsSaveButton.disabled = true;
-  newKeywordsStatus.textContent = "신규 키워드 카테고리를 저장하는 중입니다.";
-
+async function renderCategoryStatusSheet(options = {}) {
+  categoryStatusRefreshButton.disabled = true;
   try {
-    const saved = await persistCategoryMappings();
-    renderNewKeywordSummary();
-    renderNewKeywordRows();
-    newKeywordsStatus.textContent = `${saved.mappings.length}개 키워드 매칭을 저장했습니다. 이후 모든 리포트와 비교에 반영됩니다.`;
-  } catch (error) {
-    newKeywordsStatus.textContent = error.message;
+    if (options.refreshReports) reportCache = new Map();
+    categoryStatusReports = await loadAllReports();
+
+    if (!categoryStatusReports.length) {
+      categoryStatusRows = [];
+      categoryStatusSummary.replaceChildren();
+      categoryStatusList.innerHTML = `<p class="empty">저장된 자료가 없습니다.</p>`;
+      categoryPeriodBody.innerHTML = `<tr><td colspan="4">저장된 자료가 없습니다.</td></tr>`;
+      categoryKeywordBody.innerHTML = `<tr><td colspan="4">저장된 자료가 없습니다.</td></tr>`;
+      categoryRankChart.innerHTML = `<text x="24" y="40" class="chart-empty">저장된 자료가 없습니다.</text>`;
+      categoryRankLegend.replaceChildren();
+      return;
+    }
+
+    categoryStatusRows = buildCategoryStatusRows(categoryStatusReports);
+    if (!categoryStatusRows.some((row) => row.category === selectedStatusCategory)) {
+      selectedStatusCategory = categoryStatusRows.find((row) => row.keywords.length)?.category
+        || categoryStatusRows[0]?.category
+        || "";
+    }
+
+    renderCategoryStatusSummary();
+    renderCategoryStatusList();
+    renderCategoryDetail();
+    updateStatusSeriesOptions();
+    ensureDefaultTrendSeries();
+    renderSelectedTrendSeries();
+    renderCategoryRankChart();
   } finally {
-    newKeywordsSaveButton.disabled = false;
+    categoryStatusRefreshButton.disabled = false;
   }
+}
+
+function buildCategoryStatusRows(reports) {
+  const keywordMap = new Map();
+
+  reports.forEach((report, reportIndex) => {
+    for (const reportRow of report.rows || []) {
+      const key = normalizeText(reportRow.keyword);
+      if (!key) continue;
+      const manualCategory = manualCategoryFor(reportRow.keyword);
+      const category = manualCategory || autoProductCategoryFor(reportRow.keyword);
+      const existing = keywordMap.get(key) || {
+        key,
+        keyword: reportRow.keyword,
+        category,
+        assignmentType: manualCategory ? "manual" : category === "미지정" ? "unmapped" : "automatic",
+        periodRanks: Array(reports.length).fill(null),
+        latestPeriod: "",
+        latestEndDate: "",
+        latestRank: null
+      };
+      const endDate = reportEndDate(report);
+      existing.periodRanks[reportIndex] = Number(reportRow.rank) || null;
+      if (!existing.latestEndDate || endDate >= existing.latestEndDate) {
+        existing.keyword = reportRow.keyword;
+        existing.category = category;
+        existing.assignmentType = manualCategory ? "manual" : category === "미지정" ? "unmapped" : "automatic";
+        existing.latestPeriod = report.month;
+        existing.latestEndDate = endDate;
+        existing.latestRank = Number(reportRow.rank) || null;
+      }
+      keywordMap.set(key, existing);
+    }
+  });
+
+  const keywords = [...keywordMap.values()];
+  const categories = [...productCategories];
+  if (keywords.some((row) => row.category === "미지정")) categories.push("미지정");
+
+  return categories.map((category) => {
+    const categoryKeywords = keywords
+      .filter((row) => row.category === category)
+      .sort((a, b) => Number(a.latestRank || 9999) - Number(b.latestRank || 9999) || a.keyword.localeCompare(b.keyword, "ko"));
+    const points = reports.map((_, reportIndex) => {
+      const ranks = categoryKeywords
+        .map((row) => row.periodRanks[reportIndex])
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      return {
+        bestRank: ranks[0] || null,
+        top100Count: ranks.filter((rank) => rank <= 100).length,
+        top500Count: ranks.length
+      };
+    });
+
+    return {
+      category,
+      keywords: categoryKeywords,
+      points,
+      manualCount: categoryKeywords.filter((row) => row.assignmentType === "manual").length,
+      automaticCount: categoryKeywords.filter((row) => row.assignmentType === "automatic").length
+    };
+  });
+}
+
+function allCategoryStatusKeywords() {
+  const byKey = new Map();
+  for (const category of categoryStatusRows) {
+    for (const keyword of category.keywords) byKey.set(keyword.key, keyword);
+  }
+  return [...byKey.values()];
+}
+
+function renderCategoryStatusSummary() {
+  const keywords = allCategoryStatusKeywords();
+  const manualCount = keywords.filter((row) => row.assignmentType === "manual").length;
+  const automaticCount = keywords.filter((row) => row.assignmentType === "automatic").length;
+  const unmappedCount = keywords.filter((row) => row.assignmentType === "unmapped").length;
+
+  categoryStatusSummary.innerHTML = [
+    comparisonMetricHtml("카테고리", `${productCategories.length}개`, "현재 저장할 수 있는 제품군"),
+    comparisonMetricHtml("고유 키워드", `${keywords.length}개`, "저장 자료 전체 기준"),
+    comparisonMetricHtml("직접 지정 / 자동", `${manualCount} / ${automaticCount}`, "직접 매칭과 자동 규칙 적용"),
+    comparisonMetricHtml("미지정", `${unmappedCount}개`, "카테고리 규칙에 포함되지 않은 키워드")
+  ].join("");
+}
+
+function renderCategoryStatusList() {
+  categoryListCount.textContent = `${categoryStatusRows.length}개`;
+  categoryStatusList.replaceChildren();
+
+  for (const row of categoryStatusRows) {
+    const latest = row.points[row.points.length - 1] || { bestRank: null, top500Count: 0 };
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "category-status-button";
+    button.classList.toggle("active", row.category === selectedStatusCategory);
+    button.innerHTML = `
+      <span>${escapeHtml(row.category)}</span>
+      <small>${row.keywords.length}개 키워드 · 최신 ${latest.bestRank ? `${latest.bestRank}위` : "진입 없음"}</small>
+    `;
+    button.addEventListener("click", () => {
+      selectedStatusCategory = row.category;
+      renderCategoryStatusList();
+      renderCategoryDetail();
+    });
+    categoryStatusList.append(button);
+  }
+}
+
+function renderCategoryDetail() {
+  const row = categoryStatusRows.find((item) => item.category === selectedStatusCategory);
+  if (!row) {
+    categoryDetailTitle.textContent = "카테고리 선택";
+    categoryDetailMeta.textContent = "";
+    categoryPeriodBody.innerHTML = `<tr><td colspan="4">카테고리를 선택해주세요.</td></tr>`;
+    categoryKeywordBody.innerHTML = `<tr><td colspan="4">카테고리를 선택해주세요.</td></tr>`;
+    return;
+  }
+
+  categoryDetailTitle.textContent = row.category;
+  categoryDetailMeta.textContent = `하부 키워드 ${row.keywords.length}개 · 직접 지정 ${row.manualCount}개 · 자동 규칙 ${row.automaticCount}개`;
+  categoryPeriodBody.innerHTML = row.points.map((point, index) => `
+    <tr>
+      <td>${escapeHtml(periodLabel(categoryStatusReports[index]))}</td>
+      <td>${point.bestRank ? `${point.bestRank}위` : "-"}</td>
+      <td>${point.top100Count}개</td>
+      <td>${point.top500Count}개</td>
+    </tr>
+  `).join("");
+  renderCategoryKeywordRows();
+}
+
+function renderCategoryKeywordRows() {
+  const row = categoryStatusRows.find((item) => item.category === selectedStatusCategory);
+  if (!row) return;
+  const search = normalizeText(categoryKeywordSearch.value);
+  const keywords = row.keywords.filter((item) => !search || normalizeText(item.keyword).includes(search));
+
+  if (!keywords.length) {
+    categoryKeywordBody.innerHTML = `<tr><td colspan="4">조건에 맞는 하부 키워드가 없습니다.</td></tr>`;
+    return;
+  }
+
+  categoryKeywordBody.innerHTML = keywords.map((item) => `
+    <tr>
+      <td><strong>${escapeHtml(item.keyword)}</strong></td>
+      <td>${assignmentBadgeHtml(item.assignmentType)}</td>
+      <td>${escapeHtml(periodLabel(item.latestPeriod))}</td>
+      <td>${item.latestRank ? `${item.latestRank}위` : "-"}</td>
+    </tr>
+  `).join("");
+}
+
+function assignmentBadgeHtml(type) {
+  const labels = { manual: "직접 지정", automatic: "자동 규칙", unmapped: "미지정" };
+  return `<span class="assignment-badge ${type}">${labels[type] || "미지정"}</span>`;
+}
+
+function updateStatusSeriesOptions() {
+  const type = statusSeriesType.value;
+  const values = type === "category"
+    ? categoryStatusRows.map((row) => row.category)
+    : allCategoryStatusKeywords().map((row) => row.keyword).sort((a, b) => a.localeCompare(b, "ko"));
+
+  statusSeriesOptions.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  statusSeriesSearch.placeholder = type === "category" ? "카테고리 검색" : "키워드 검색";
+}
+
+function ensureDefaultTrendSeries() {
+  const validCategories = new Set(categoryStatusRows.map((row) => row.category));
+  const validKeywords = new Set(allCategoryStatusKeywords().map((row) => normalizeText(row.keyword)));
+  selectedTrendSeries = selectedTrendSeries.filter((series) => (
+    series.type === "category"
+      ? validCategories.has(series.value)
+      : series.type === "keyword" && validKeywords.has(normalizeText(series.value))
+  ));
+
+  if (!selectedTrendSeries.length) {
+    selectedTrendSeries = categoryStatusRows
+      .filter((row) => row.keywords.length)
+      .sort((a, b) => Number(a.points.at(-1)?.bestRank || 9999) - Number(b.points.at(-1)?.bestRank || 9999))
+      .slice(0, 5)
+      .map((row) => ({ type: "category", value: row.category }));
+  }
+  saveTrendSeriesSelection();
+}
+
+function addTrendSeries() {
+  const type = statusSeriesType.value;
+  const requested = String(statusSeriesSearch.value || "").trim();
+  if (!requested) return;
+  const candidates = type === "category"
+    ? categoryStatusRows.map((row) => row.category)
+    : allCategoryStatusKeywords().map((row) => row.keyword);
+  const exact = candidates.find((value) => normalizeText(value) === normalizeText(requested));
+  const value = exact || candidates.find((item) => normalizeText(item).includes(normalizeText(requested)));
+
+  if (!value) {
+    statusSeriesSearch.setCustomValidity("저장 자료에 있는 항목을 선택해주세요.");
+    statusSeriesSearch.reportValidity();
+    return;
+  }
+  statusSeriesSearch.setCustomValidity("");
+  if (selectedTrendSeries.some((series) => series.type === type && normalizeText(series.value) === normalizeText(value))) {
+    statusSeriesSearch.value = "";
+    return;
+  }
+  if (selectedTrendSeries.length >= 12) {
+    statusSeriesSearch.setCustomValidity("그래프에는 최대 12개 항목을 표시할 수 있습니다.");
+    statusSeriesSearch.reportValidity();
+    return;
+  }
+
+  selectedTrendSeries.push({ type, value });
+  statusSeriesSearch.value = "";
+  saveTrendSeriesSelection();
+  renderSelectedTrendSeries();
+  renderCategoryRankChart();
+}
+
+function removeTrendSeries(index) {
+  selectedTrendSeries.splice(index, 1);
+  saveTrendSeriesSelection();
+  renderSelectedTrendSeries();
+  renderCategoryRankChart();
+}
+
+function renderSelectedTrendSeries() {
+  if (!selectedTrendSeries.length) {
+    statusSeriesList.innerHTML = `<p class="empty">표시할 카테고리나 키워드를 추가해주세요.</p>`;
+    return;
+  }
+
+  statusSeriesList.replaceChildren();
+  selectedTrendSeries.forEach((series, index) => {
+    const item = document.createElement("span");
+    item.className = "selected-series-item";
+    const label = document.createElement("span");
+    label.textContent = `${series.type === "category" ? "카테고리" : "키워드"} · ${series.value}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = `${series.value} 그래프에서 제거`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.addEventListener("click", () => removeTrendSeries(index));
+    item.append(label, remove);
+    statusSeriesList.append(item);
+  });
+}
+
+function trendSeriesPoints(series) {
+  if (series.type === "category") {
+    return categoryStatusRows.find((row) => row.category === series.value)?.points.map((point) => point.bestRank) || [];
+  }
+
+  const keyword = allCategoryStatusKeywords().find((row) => normalizeText(row.keyword) === normalizeText(series.value));
+  return keyword?.periodRanks || [];
+}
+
+function renderCategoryRankChart() {
+  const reports = categoryStatusReports;
+  const series = selectedTrendSeries.map((item) => ({ ...item, points: trendSeriesPoints(item) }));
+  if (!reports.length || !series.length) {
+    categoryRankChart.setAttribute("viewBox", "0 0 920 280");
+    categoryRankChart.innerHTML = `<text x="28" y="44" class="chart-empty">표시할 카테고리나 키워드를 추가해주세요.</text>`;
+    categoryRankLegend.replaceChildren();
+    return;
+  }
+
+  const colors = ["#168246", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#be123c", "#4d7c0f", "#9333ea", "#0f766e", "#c2410c", "#475569"];
+  const width = Math.max(920, reports.length * 128);
+  const height = 360;
+  const padding = { top: 22, right: 24, bottom: 68, left: 58 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const observed = series.flatMap((item) => item.points).filter(Number.isFinite);
+  const maxObserved = Math.max(50, ...observed);
+  const maxRank = Math.min(500, Math.ceil(maxObserved / 50) * 50);
+  const x = (index) => padding.left + (reports.length <= 1 ? chartWidth / 2 : chartWidth * index / (reports.length - 1));
+  const y = (rank) => padding.top + chartHeight * (Number(rank) - 1) / Math.max(1, maxRank - 1);
+  const ticks = [...new Set([1, Math.ceil(maxRank * 0.25), Math.ceil(maxRank * 0.5), Math.ceil(maxRank * 0.75), maxRank])];
+
+  categoryRankChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  categoryRankChart.style.minWidth = `${width}px`;
+  categoryRankChart.innerHTML = `
+    ${ticks.map((tick) => `
+      <line x1="${padding.left}" y1="${y(tick)}" x2="${padding.left + chartWidth}" y2="${y(tick)}" class="rank-grid"></line>
+      <text x="${padding.left - 10}" y="${y(tick) + 4}" text-anchor="end" class="axis-label">${tick}위</text>
+    `).join("")}
+    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" class="axis"></line>
+    <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" class="axis"></line>
+    ${reports.map((report, index) => {
+      const [line1, line2] = periodAxisLabelParts(periodLabel(report));
+      return `<text x="${x(index)}" y="${height - 34}" text-anchor="middle" class="axis-label"><tspan x="${x(index)}">${escapeHtml(line1)}</tspan>${line2 ? `<tspan x="${x(index)}" dy="13">${escapeHtml(line2)}</tspan>` : ""}</text>`;
+    }).join("")}
+    ${series.map((item, seriesIndex) => renderRankSeriesSvg(item, seriesIndex, colors[seriesIndex % colors.length], x, y)).join("")}
+  `;
+
+  categoryRankLegend.innerHTML = series.map((item, index) => `
+    <div class="rank-legend-item">
+      <span class="rank-legend-swatch" style="background:${colors[index % colors.length]}"></span>
+      <span><strong>${escapeHtml(item.value)}</strong><small>${item.type === "category" ? "카테고리 최고 순위" : "개별 키워드 순위"}</small></span>
+    </div>
+  `).join("");
+}
+
+function renderRankSeriesSvg(series, seriesIndex, color, x, y) {
+  const segments = [];
+  let current = [];
+  series.points.forEach((rank, index) => {
+    if (Number.isFinite(rank)) current.push({ rank, index });
+    else if (current.length) {
+      segments.push(current);
+      current = [];
+    }
+  });
+  if (current.length) segments.push(current);
+
+  const paths = segments.map((segment) => {
+    const path = segment.map((point, index) => `${index ? "L" : "M"} ${x(point.index)} ${y(point.rank)}`).join(" ");
+    return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"></path>`;
+  }).join("");
+  const points = series.points.map((rank, index) => Number.isFinite(rank) ? `
+    <circle cx="${x(index)}" cy="${y(rank)}" r="4" fill="${color}">
+      <title>${escapeHtml(series.value)} · ${rank}위</title>
+    </circle>
+  ` : "").join("");
+  return `<g data-series-index="${seriesIndex}">${paths}${points}</g>`;
+}
+
+function readTrendSeriesSelection() {
+  try {
+    const value = JSON.parse(localStorage.getItem(CATEGORY_TREND_SELECTION_STORAGE_KEY) || "[]");
+    return Array.isArray(value)
+      ? value.filter((item) => ["category", "keyword"].includes(item?.type) && String(item.value || "").trim()).slice(0, 12)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTrendSeriesSelection() {
+  localStorage.setItem(CATEGORY_TREND_SELECTION_STORAGE_KEY, JSON.stringify(selectedTrendSeries));
 }
 
 async function renderComparisonSheet(options = {}) {
@@ -1474,8 +1897,9 @@ function clearComparisonView(message) {
 }
 
 function buildComparisonCategoryRows(reports, keywordRows) {
-  const rows = PRODUCT_GROUPS
-    .filter((category) => category !== "총합계")
+  const categories = [...productCategories];
+  if (keywordRows.some((row) => row.category === "미지정")) categories.push("미지정");
+  const rows = categories
     .map((category) => {
       const points = reports.map((_, reportIndex) => {
         const ranks = keywordRows
@@ -2105,124 +2529,6 @@ async function writeRichClipboard(html, plainText) {
     container.remove();
   }
   if (!copied) throw new Error("브라우저가 서식 복사를 허용하지 않았습니다.");
-}
-
-function parseKeywordGroups(text) {
-  return String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [labelPart, termsPart = ""] = line.includes("=") ? line.split(/=(.*)/s) : [line, line];
-      const label = labelPart.trim();
-      const terms = termsPart.split(",").map((term) => normalizeText(term)).filter(Boolean);
-      return { label, terms: terms.length ? terms : [normalizeText(label)] };
-    })
-    .filter((group) => group.label && group.terms.length);
-}
-
-function summarizeGroup(report, group) {
-  const matched = (report.rows || []).filter((row) => group.terms.some((term) => normalizeText(row.keyword).includes(term)));
-  const score = matched.reduce((sum, row) => sum + Number(row.dailyAverageRatio || 0), 0);
-  const rank = matched.length ? Math.min(...matched.map((row) => Number(row.rank) || Infinity)) : null;
-
-  return {
-    score,
-    rank,
-    keywords: matched.map((row) => row.keyword)
-  };
-}
-
-function renderTrendTable(months, matrix) {
-  trendHead.innerHTML = `
-    <tr>
-      <th>그룹</th>
-      <th>최근 점수</th>
-      <th>점수 증감</th>
-      <th>최근 최고순위</th>
-      <th>순위 변동</th>
-      ${months.map((month) => `<th>${escapeHtml(month)}</th>`).join("")}
-    </tr>
-  `;
-  trendBody.replaceChildren();
-
-  for (const row of [...matrix].sort((a, b) => b.latestScore - a.latestScore)) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(row.label)}</td>
-      <td>${formatScore(row.latestScore)}</td>
-      <td>${formatDelta(row.scoreDelta)}</td>
-      <td>${row.latestRank || "-"}</td>
-      <td>${row.rankDelta == null ? "-" : formatDelta(row.rankDelta)}</td>
-      ${row.points.map((point) => `<td>${formatScore(point.score)} / ${point.rank || "-"}</td>`).join("")}
-    `;
-    trendBody.append(tr);
-  }
-}
-
-function renderTrendChart(months, matrix) {
-  const width = 920;
-  const series = [...matrix];
-  const height = Math.max(320, 104 + series.length * 18);
-  const padding = { top: 18, right: 172, bottom: 58, left: 56 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const legendX = width - padding.right + 24;
-  const legendY = padding.top + 12;
-  const maxScore = Math.max(1, ...series.flatMap((group) => group.points.map((point) => point.score)));
-  const colors = [
-    "#168246",
-    "#2563eb",
-    "#d97706",
-    "#dc2626",
-    "#7c3aed",
-    "#0891b2",
-    "#be123c",
-    "#4d7c0f",
-    "#9333ea",
-    "#0f766e",
-    "#c2410c",
-    "#475569"
-  ];
-  const x = (index) => padding.left + (months.length <= 1 ? chartWidth / 2 : (chartWidth * index) / (months.length - 1));
-  const y = (score) => padding.top + chartHeight - (chartHeight * score) / maxScore;
-
-  trendChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  trendChart.style.height = `${height}px`;
-  trendChart.style.minHeight = `${height}px`;
-  trendChart.innerHTML = `
-    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" class="axis"></line>
-    <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" class="axis"></line>
-    <line x1="${padding.left + chartWidth + 14}" y1="${padding.top}" x2="${padding.left + chartWidth + 14}" y2="${padding.top + chartHeight}" class="axis"></line>
-    ${months.map((month, index) => {
-      const [line1, line2] = periodAxisLabelParts(month);
-      return `
-        <text x="${x(index)}" y="${height - 34}" text-anchor="middle" class="axis-label">
-          <tspan x="${x(index)}" dy="0">${escapeHtml(line1)}</tspan>
-          ${line2 ? `<tspan x="${x(index)}" dy="13">${escapeHtml(line2)}</tspan>` : ""}
-        </text>
-      `;
-    }).join("")}
-    ${series.map((group, groupIndex) => {
-      const path = group.points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.score)}`).join(" ");
-      const color = colors[groupIndex % colors.length];
-      return `
-        <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"></path>
-        ${group.points.map((point, index) => `<circle cx="${x(index)}" cy="${y(point.score)}" r="3.5" fill="${color}"></circle>`).join("")}
-      `;
-    }).join("")}
-    ${series.map((group, groupIndex) => {
-      const color = colors[groupIndex % colors.length];
-      const yOffset = legendY + groupIndex * 18;
-      return `
-        <g transform="translate(${legendX}, ${yOffset})">
-          <line x1="0" y1="0" x2="12" y2="0" stroke="${color}" stroke-width="2.5"></line>
-          <circle cx="6" cy="0" r="3" fill="${color}"></circle>
-          <text x="18" y="4" class="legend" fill="${color}">${escapeHtml(group.label)}</text>
-        </g>
-      `;
-    }).join("")}
-  `;
 }
 
 function periodAxisLabelParts(value) {
