@@ -32,6 +32,9 @@ const comparisonStatus = document.querySelector("#comparison-status");
 const comparisonSummary = document.querySelector("#comparison-summary");
 const comparisonRangeLabel = document.querySelector("#comparison-range-label");
 const comparisonInsights = document.querySelector("#comparison-insights");
+const comparisonLatestStatus = document.querySelector("#comparison-latest-status");
+const comparisonLatestSummary = document.querySelector("#comparison-latest-summary");
+const comparisonLatestBody = document.querySelector("#comparison-latest-body");
 const comparisonCategoryHead = document.querySelector("#comparison-category-head");
 const comparisonCategoryBody = document.querySelector("#comparison-category-body");
 const comparisonKeywordSearch = document.querySelector("#comparison-keyword-search");
@@ -96,6 +99,7 @@ const DEFAULT_KEYWORD_GROUPS = [
 ];
 const REPORT_ORDER_STORAGE_KEY = "reportOrder";
 const COMPARISON_SELECTION_STORAGE_KEY = "comparisonReportSelection";
+const LATEST_RANK_CHANGE_THRESHOLD = 50;
 
 let selectedMonth = null;
 let currentReport = null;
@@ -109,6 +113,7 @@ let comparisonSelectedKeys = new Set();
 let comparisonReports = [];
 let comparisonCategoryRows = [];
 let comparisonKeywordRows = [];
+let comparisonLatestChanges = [];
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -980,9 +985,11 @@ async function renderComparisonSheet(options = {}) {
   comparisonReports = reports;
   comparisonKeywordRows = buildComparisonKeywordRows(reports);
   comparisonCategoryRows = buildComparisonCategoryRows(reports, comparisonKeywordRows);
+  comparisonLatestChanges = buildLatestRankChanges(reports);
 
   renderComparisonSummary(reports, comparisonKeywordRows);
   renderComparisonInsights(reports, comparisonCategoryRows, comparisonKeywordRows);
+  renderLatestRankChanges(reports, comparisonLatestChanges);
   renderComparisonCategoryTable(reports, comparisonCategoryRows);
   renderComparisonKeywordTableHead(reports);
   renderComparisonKeywordRows();
@@ -1056,9 +1063,13 @@ function clearComparisonView(message) {
   comparisonReports = [];
   comparisonCategoryRows = [];
   comparisonKeywordRows = [];
+  comparisonLatestChanges = [];
   comparisonSummary.replaceChildren();
   comparisonInsights.innerHTML = `<p class="empty">${escapeHtml(message)}</p>`;
   comparisonRangeLabel.textContent = "";
+  comparisonLatestStatus.textContent = message;
+  comparisonLatestSummary.replaceChildren();
+  comparisonLatestBody.innerHTML = `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`;
   comparisonCategoryHead.innerHTML = "";
   comparisonCategoryBody.innerHTML = `<tr><td>${escapeHtml(message)}</td></tr>`;
   comparisonKeywordHead.innerHTML = "";
@@ -1147,6 +1158,99 @@ function keywordChangeType(points, first, latest, rankDelta) {
   if (rankDelta > 0) return "rising";
   if (rankDelta < 0) return "falling";
   return "unchanged";
+}
+
+function buildLatestRankChanges(reports) {
+  if (reports.length < 2) return [];
+
+  const previous = reports[reports.length - 2];
+  const latest = reports[reports.length - 1];
+  const previousRows = new Map((previous.rows || []).map((row) => [normalizeText(row.keyword), row]));
+  const latestRows = new Map((latest.rows || []).map((row) => [normalizeText(row.keyword), row]));
+  const keys = new Set([...previousRows.keys(), ...latestRows.keys()]);
+  const changes = [];
+
+  for (const key of keys) {
+    const previousRow = previousRows.get(key) || null;
+    const latestRow = latestRows.get(key) || null;
+    const keyword = latestRow?.keyword || previousRow?.keyword || key;
+
+    if (previousRow && latestRow) {
+      const rankDelta = Number(previousRow.rank) - Number(latestRow.rank);
+      if (Math.abs(rankDelta) < LATEST_RANK_CHANGE_THRESHOLD) continue;
+      changes.push({
+        keyword,
+        category: productCategoryFor(keyword),
+        previousRank: Number(previousRow.rank),
+        latestRank: Number(latestRow.rank),
+        rankDelta,
+        changeType: rankDelta > 0 ? "rising" : "falling"
+      });
+      continue;
+    }
+
+    changes.push({
+      keyword,
+      category: productCategoryFor(keyword),
+      previousRank: previousRow ? Number(previousRow.rank) : null,
+      latestRank: latestRow ? Number(latestRow.rank) : null,
+      rankDelta: null,
+      changeType: latestRow ? "new" : "exited"
+    });
+  }
+
+  const typeOrder = { rising: 0, falling: 1, new: 2, exited: 3 };
+  return changes.sort((a, b) => {
+    const typeDifference = typeOrder[a.changeType] - typeOrder[b.changeType];
+    if (typeDifference) return typeDifference;
+    if (a.changeType === "rising") return b.rankDelta - a.rankDelta;
+    if (a.changeType === "falling") return a.rankDelta - b.rankDelta;
+    return Number(a.latestRank || a.previousRank || 9999) - Number(b.latestRank || b.previousRank || 9999);
+  });
+}
+
+function renderLatestRankChanges(reports, changes) {
+  const previous = reports[reports.length - 2];
+  const latest = reports[reports.length - 1];
+  const counts = {
+    rising: changes.filter((row) => row.changeType === "rising").length,
+    falling: changes.filter((row) => row.changeType === "falling").length,
+    new: changes.filter((row) => row.changeType === "new").length,
+    exited: changes.filter((row) => row.changeType === "exited").length
+  };
+
+  comparisonLatestStatus.textContent = `${periodLabel(previous)} 대비 ${periodLabel(latest)} · 총 ${changes.length}개`;
+  comparisonLatestSummary.innerHTML = [
+    latestChangeStatHtml(`${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, counts.rising, "positive"),
+    latestChangeStatHtml(`${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, counts.falling, "negative"),
+    latestChangeStatHtml("신규 Top 500", counts.new, "positive"),
+    latestChangeStatHtml("Top 500 이탈", counts.exited, "negative")
+  ].join("");
+
+  if (!changes.length) {
+    comparisonLatestBody.innerHTML = `<tr><td colspan="6">조건에 해당하는 최신 순위 변화가 없습니다.</td></tr>`;
+    return;
+  }
+
+  comparisonLatestBody.innerHTML = changes.map((row) => `
+    <tr>
+      <td><strong>${escapeHtml(row.keyword)}</strong></td>
+      <td>${escapeHtml(row.category)}</td>
+      <td>${row.previousRank || "-"}</td>
+      <td>${row.latestRank || "-"}</td>
+      <td class="${deltaClass(row.rankDelta)}">${row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta)}</td>
+      <td>${changeBadgeHtml(row.changeType)}</td>
+    </tr>
+  `).join("");
+}
+
+function latestChangeStatHtml(label, count, className) {
+  return `
+    <div class="latest-change-stat">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${className}">${count}개</strong>
+    </div>
+  `;
 }
 
 function renderComparisonSummary(reports, keywordRows) {
@@ -1343,6 +1447,18 @@ function downloadComparisonXlsx() {
       row.bestRankDelta == null ? formatCategoryRankChange(row) : row.bestRankDelta,
       row.top100Delta,
       row.top500Delta
+    ]),
+    [],
+    ["최신 기간 주요 순위 변화"],
+    ["비교 구간", periodLabels[periodLabels.length - 2], periodLabels[periodLabels.length - 1]],
+    ["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"],
+    ...comparisonLatestChanges.map((row) => [
+      row.keyword,
+      row.category,
+      row.previousRank || "",
+      row.latestRank || "",
+      row.rankDelta == null ? "" : row.rankDelta,
+      ({ new: "신규 Top 500", rising: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, falling: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, exited: "Top 500 이탈" })[row.changeType]
     ]),
     [],
     [
