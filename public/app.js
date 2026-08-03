@@ -978,8 +978,8 @@ async function renderComparisonSheet(options = {}) {
   }
 
   comparisonReports = reports;
-  comparisonCategoryRows = buildComparisonCategoryRows(reports);
   comparisonKeywordRows = buildComparisonKeywordRows(reports);
+  comparisonCategoryRows = buildComparisonCategoryRows(reports, comparisonKeywordRows);
 
   renderComparisonSummary(reports, comparisonKeywordRows);
   renderComparisonInsights(reports, comparisonCategoryRows, comparisonKeywordRows);
@@ -1066,26 +1066,42 @@ function clearComparisonView(message) {
   comparisonKeywordStatus.textContent = message;
 }
 
-function buildComparisonCategoryRows(reports) {
-  const scoresByReport = reports.map((report) => scoreByProductGroup(report.rows || []));
-  const rows = PRODUCT_GROUPS.map((category) => {
-    const scores = scoresByReport.map((scores) => Number(scores.get(category) || 0));
-    const firstScore = scores[0] || 0;
-    const latestScore = scores[scores.length - 1] || 0;
-    return {
-      category,
-      scores,
-      firstScore,
-      latestScore,
-      scoreDelta: latestScore - firstScore,
-      percentDelta: firstScore ? ((latestScore - firstScore) / firstScore) * 100 : null
-    };
-  }).filter((row) => row.category === "총합계" || row.scores.some((score) => score > 0));
+function buildComparisonCategoryRows(reports, keywordRows) {
+  const rows = PRODUCT_GROUPS
+    .filter((category) => category !== "총합계")
+    .map((category) => {
+      const points = reports.map((_, reportIndex) => {
+        const ranks = keywordRows
+          .filter((row) => row.category === category && row.points[reportIndex])
+          .map((row) => Number(row.points[reportIndex].rank))
+          .filter(Number.isFinite)
+          .sort((a, b) => a - b);
+
+        return {
+          bestRank: ranks[0] || null,
+          top100Count: ranks.filter((rank) => rank <= 100).length,
+          top500Count: ranks.length
+        };
+      });
+      const first = points[0];
+      const latest = points[points.length - 1];
+
+      return {
+        category,
+        points,
+        first,
+        latest,
+        bestRankDelta: first.bestRank && latest.bestRank ? first.bestRank - latest.bestRank : null,
+        top100Delta: latest.top100Count - first.top100Count,
+        top500Delta: latest.top500Count - first.top500Count
+      };
+    })
+    .filter((row) => row.points.some((point) => point.top500Count > 0));
 
   return rows.sort((a, b) => {
-    if (a.category === "총합계") return -1;
-    if (b.category === "총합계") return 1;
-    return b.latestScore - a.latestScore || b.scoreDelta - a.scoreDelta;
+    if (a.latest.bestRank && !b.latest.bestRank) return -1;
+    if (!a.latest.bestRank && b.latest.bestRank) return 1;
+    return Number(a.latest.bestRank || a.first.bestRank || 9999) - Number(b.latest.bestRank || b.first.bestRank || 9999);
   });
 }
 
@@ -1106,7 +1122,6 @@ function buildComparisonKeywordRows(reports) {
     const latest = points[points.length - 1];
     const keyword = latest?.keyword || [...points].reverse().find(Boolean)?.keyword || first?.keyword || key;
     const rankDelta = first && latest ? Number(first.rank) - Number(latest.rank) : null;
-    const scoreDelta = Number(latest?.dailyAverageRatio || 0) - Number(first?.dailyAverageRatio || 0);
 
     return {
       key,
@@ -1116,7 +1131,6 @@ function buildComparisonKeywordRows(reports) {
       first,
       latest,
       rankDelta,
-      scoreDelta,
       changeType: keywordChangeType(points, first, latest, rankDelta)
     };
   }).sort((a, b) => {
@@ -1136,20 +1150,17 @@ function keywordChangeType(points, first, latest, rankDelta) {
 }
 
 function renderComparisonSummary(reports, keywordRows) {
-  const totals = reports.map((report) => (report.rows || []).reduce((sum, row) => sum + Number(row.dailyAverageRatio || 0), 0));
-  const firstTotal = totals[0] || 0;
-  const latestTotal = totals[totals.length - 1] || 0;
-  const totalDelta = latestTotal - firstTotal;
-  const totalPercent = firstTotal ? (totalDelta / firstTotal) * 100 : null;
+  const commonCount = keywordRows.filter((row) => row.first && row.latest).length;
   const newCount = keywordRows.filter((row) => row.changeType === "new").length;
   const exitedCount = keywordRows.filter((row) => row.changeType === "exited").length;
   const risingCount = keywordRows.filter((row) => row.changeType === "rising").length;
+  const fallingCount = keywordRows.filter((row) => row.changeType === "falling").length;
 
   comparisonSummary.innerHTML = [
     comparisonMetricHtml("선택 기간", `${reports.length}개`, `${periodLabel(reports[0])}부터`),
-    comparisonMetricHtml("상대점수 총계 증감", formatDelta(totalDelta), totalPercent == null ? "기준값 없음" : formatPercent(totalPercent), deltaClass(totalDelta)),
+    comparisonMetricHtml("공통 검색어", `${commonCount}개`, "첫·마지막 기간 모두 Top 500"),
     comparisonMetricHtml("개별 검색어 신규 / 이탈", `${newCount} / ${exitedCount}`, "동일한 검색어 문구 기준"),
-    comparisonMetricHtml("순위 상승 키워드", `${risingCount}개`, "두 기간 모두 Top 500인 검색어")
+    comparisonMetricHtml("순위 상승 / 하락", `${risingCount} / ${fallingCount}`, "검색 순위 기준")
   ].join("");
 }
 
@@ -1164,32 +1175,27 @@ function comparisonMetricHtml(label, value, detail, className = "") {
 }
 
 function renderComparisonInsights(reports, categoryRows, keywordRows) {
-  const growingCategory = categoryRows
-    .filter((row) => row.category !== "총합계" && row.scoreDelta > 0)
-    .sort((a, b) => b.scoreDelta - a.scoreDelta)[0];
-  const fallingCategory = categoryRows
-    .filter((row) => row.category !== "총합계" && row.scoreDelta < 0)
-    .sort((a, b) => a.scoreDelta - b.scoreDelta)[0];
   const rankWinner = keywordRows
     .filter((row) => row.rankDelta > 0)
     .sort((a, b) => b.rankDelta - a.rankDelta)[0];
   const bestNew = keywordRows
     .filter((row) => row.changeType === "new")
     .sort((a, b) => Number(a.latest?.rank || 9999) - Number(b.latest?.rank || 9999))[0];
+  const broadeningCategory = categoryRows
+    .filter((row) => row.top100Delta > 0 || row.top500Delta > 0)
+    .sort((a, b) => b.top100Delta - a.top100Delta || b.top500Delta - a.top500Delta)[0];
 
-  const categoryInsight = growingCategory
-    ? `<strong>성장 제품군</strong>${escapeHtml(growingCategory.category)} 제품군이 ${escapeHtml(formatDelta(growingCategory.scoreDelta))}점으로 가장 크게 증가했습니다.`
-    : `<strong>성장 제품군</strong>첫 기간보다 점수가 증가한 제품군이 없습니다.`;
-  const declineInsight = fallingCategory
-    ? `<strong>감소 제품군</strong>${escapeHtml(fallingCategory.category)} 제품군이 ${escapeHtml(formatDelta(fallingCategory.scoreDelta))}점으로 가장 크게 감소했습니다.`
-    : `<strong>감소 제품군</strong>첫 기간보다 점수가 감소한 제품군이 없습니다.`;
-  const keywordInsight = rankWinner
-    ? `<strong>최대 순위 상승</strong>${escapeHtml(rankWinner.keyword)}이 ${rankWinner.rankDelta}위 상승했습니다.${bestNew ? ` 신규 진입 최고 순위는 ${escapeHtml(bestNew.keyword)} ${bestNew.latest.rank}위입니다.` : ""}`
-    : bestNew
-      ? `<strong>신규 진입</strong>${escapeHtml(bestNew.keyword)}이 ${bestNew.latest.rank}위로 가장 높게 진입했습니다.`
-      : `<strong>키워드 변화</strong>두 기준 기간 사이에 순위 상승 또는 신규 진입 키워드가 없습니다.`;
+  const rankInsight = rankWinner
+    ? `<strong>최대 순위 상승</strong>${escapeHtml(rankWinner.keyword)}이 ${rankWinner.rankDelta}위 상승했습니다.`
+    : `<strong>순위 상승</strong>두 기준 기간에 공통으로 등장하며 순위가 오른 검색어가 없습니다.`;
+  const newInsight = bestNew
+    ? `<strong>신규 진입 최고 순위</strong>${escapeHtml(bestNew.keyword)}이 ${bestNew.latest.rank}위로 진입했습니다.`
+    : `<strong>신규 진입</strong>마지막 기간에 새로 Top 500에 진입한 검색어가 없습니다.`;
+  const categoryInsight = broadeningCategory
+    ? `<strong>상위권 확장 제품군</strong>${escapeHtml(broadeningCategory.category)}의 Top 100 키워드가 ${formatCountDelta(broadeningCategory.top100Delta)}개, Top 500 키워드가 ${formatCountDelta(broadeningCategory.top500Delta)}개 변했습니다.`
+    : `<strong>제품군 분포</strong>Top 100 또는 Top 500 키워드 수가 늘어난 제품군이 없습니다.`;
 
-  comparisonInsights.innerHTML = [categoryInsight, declineInsight, keywordInsight]
+  comparisonInsights.innerHTML = [rankInsight, newInsight, categoryInsight]
     .map((content) => `<div class="comparison-insight">${content}</div>`)
     .join("");
 }
@@ -1199,18 +1205,43 @@ function renderComparisonCategoryTable(reports, rows) {
     <tr>
       <th>제품군</th>
       ${reports.map((report) => `<th>${periodHeadingHtml(report)}</th>`).join("")}
-      <th>점수 증감</th>
-      <th>증감률</th>
+      <th>최고순위 변동</th>
+      <th>Top 100 증감</th>
+      <th>Top 500 증감</th>
     </tr>
   `;
   comparisonCategoryBody.innerHTML = rows.map((row) => `
     <tr>
       <td><strong>${escapeHtml(row.category)}</strong></td>
-      ${row.scores.map((score) => `<td>${formatScore(score)}</td>`).join("")}
-      <td class="${deltaClass(row.scoreDelta)}">${formatDelta(row.scoreDelta)}</td>
-      <td class="${deltaClass(row.scoreDelta)}">${row.percentDelta == null ? "-" : formatPercent(row.percentDelta)}</td>
+      ${row.points.map(categoryPeriodHtml).join("")}
+      <td class="${categoryRankChangeClass(row)}">${formatCategoryRankChange(row)}</td>
+      <td class="${deltaClass(row.top100Delta)}">${formatCountDelta(row.top100Delta)}개</td>
+      <td class="${deltaClass(row.top500Delta)}">${formatCountDelta(row.top500Delta)}개</td>
     </tr>
   `).join("");
+}
+
+function categoryPeriodHtml(point) {
+  return `
+    <td>
+      <span class="category-period-value">
+        <strong>${point.bestRank ? `최고 ${point.bestRank}위` : "진입 없음"}</strong>
+        <small>Top 100 ${point.top100Count}개 · Top 500 ${point.top500Count}개</small>
+      </span>
+    </td>
+  `;
+}
+
+function formatCategoryRankChange(row) {
+  if (!row.first.bestRank && row.latest.bestRank) return "신규 진입";
+  if (row.first.bestRank && !row.latest.bestRank) return "Top 500 이탈";
+  return row.bestRankDelta == null ? "-" : formatRankDelta(row.bestRankDelta);
+}
+
+function categoryRankChangeClass(row) {
+  if (!row.first.bestRank && row.latest.bestRank) return "positive";
+  if (row.first.bestRank && !row.latest.bestRank) return "negative";
+  return deltaClass(row.bestRankDelta);
 }
 
 function renderComparisonKeywordTableHead(reports) {
@@ -1218,9 +1249,8 @@ function renderComparisonKeywordTableHead(reports) {
     <tr>
       <th>검색어</th>
       <th>제품군</th>
-      ${reports.map((report) => `<th>${periodHeadingHtml(report)}<br>순위 · 점수</th>`).join("")}
+      ${reports.map((report) => `<th>${periodHeadingHtml(report)}<br>검색 순위</th>`).join("")}
       <th>순위 변동</th>
-      <th>점수 증감</th>
       <th>상태</th>
     </tr>
   `;
@@ -1236,9 +1266,9 @@ function renderComparisonKeywordRows() {
     return !search || normalizeText(row.keyword).includes(search) || normalizeText(row.category).includes(search);
   });
 
-  comparisonKeywordStatus.textContent = `개별 검색어 기준 · 전체 ${comparisonKeywordRows.length}개 중 ${rows.length}개 표시`;
+  comparisonKeywordStatus.textContent = `검색 순위 기준 · 전체 ${comparisonKeywordRows.length}개 중 ${rows.length}개 표시`;
   if (!rows.length) {
-    comparisonKeywordBody.innerHTML = `<tr><td colspan="${comparisonReports.length + 6}">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    comparisonKeywordBody.innerHTML = `<tr><td colspan="${comparisonReports.length + 4}">조건에 맞는 키워드가 없습니다.</td></tr>`;
     return;
   }
 
@@ -1246,9 +1276,8 @@ function renderComparisonKeywordRows() {
     <tr>
       <td><strong>${escapeHtml(row.keyword)}</strong></td>
       <td>${escapeHtml(row.category)}</td>
-      ${row.points.map((point) => `<td>${point ? `${Number(point.rank)} · ${formatScore(point.dailyAverageRatio)}` : "-"}</td>`).join("")}
+      ${row.points.map((point) => `<td>${point ? Number(point.rank) : "-"}</td>`).join("")}
       <td class="${deltaClass(row.rankDelta)}">${row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta)}</td>
-      <td class="${deltaClass(row.scoreDelta)}">${formatDelta(row.scoreDelta)}</td>
       <td>${changeBadgeHtml(row.changeType)}</td>
     </tr>
   `).join("");
@@ -1264,10 +1293,10 @@ function formatRankDelta(value) {
   return `${number > 0 ? "+" : ""}${number}위`;
 }
 
-function formatPercent(value) {
+function formatCountDelta(value) {
   const number = Number(value || 0);
-  if (!number) return "0.0%";
-  return `${number > 0 ? "+" : ""}${number.toFixed(1)}%`;
+  if (!number) return "0";
+  return `${number > 0 ? "+" : ""}${number}`;
 }
 
 function deltaClass(value) {
@@ -1295,29 +1324,39 @@ function downloadComparisonXlsx() {
   const rows = [
     ["기간별 비교"],
     ["비교 범위", periodLabels[0], periodLabels[periodLabels.length - 1]],
+    ["비교 기준", "검색 순위", "기간별 상대 점수는 비교에 사용하지 않음"],
     [],
-    ["제품군", ...periodLabels, "점수 증감", "증감률"],
+    [
+      "제품군",
+      ...comparisonReports.flatMap((report) => [
+        `${periodLabel(report)} 최고순위`,
+        `${periodLabel(report)} Top 100 키워드 수`,
+        `${periodLabel(report)} Top 500 키워드 수`
+      ]),
+      "최고순위 변동",
+      "Top 100 증감",
+      "Top 500 증감"
+    ],
     ...comparisonCategoryRows.map((row) => [
       row.category,
-      ...row.scores.map(roundScore),
-      roundScore(row.scoreDelta),
-      row.percentDelta == null ? "" : `${Number(row.percentDelta.toFixed(1))}%`
+      ...row.points.flatMap((point) => [point.bestRank || "", point.top100Count, point.top500Count]),
+      row.bestRankDelta == null ? formatCategoryRankChange(row) : row.bestRankDelta,
+      row.top100Delta,
+      row.top500Delta
     ]),
     [],
     [
       "검색어",
       "제품군",
-      ...comparisonReports.flatMap((report) => [`${periodLabel(report)} 순위`, `${periodLabel(report)} 점수`]),
+      ...comparisonReports.map((report) => `${periodLabel(report)} 검색 순위`),
       "순위 변동",
-      "점수 증감",
       "상태"
     ],
     ...comparisonKeywordRows.map((row) => [
       row.keyword,
       row.category,
-      ...row.points.flatMap((point) => point ? [Number(point.rank), roundScore(point.dailyAverageRatio)] : ["", ""]),
+      ...row.points.map((point) => point ? Number(point.rank) : ""),
       row.rankDelta == null ? "" : row.rankDelta,
-      roundScore(row.scoreDelta),
       ({ new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", intermediate: "중간 기간만", unchanged: "변동 없음" })[row.changeType]
     ])
   ];

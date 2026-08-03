@@ -550,6 +550,21 @@ button:disabled {
   line-height: 1.35;
 }
 
+.category-period-value {
+  display: inline-grid;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.category-period-value strong {
+  font-size: 13px;
+}
+
+.category-period-value small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .comparison-keyword-heading {
   align-items: end;
 }
