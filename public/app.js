@@ -21,6 +21,7 @@ const mappingSearch = document.querySelector("#mapping-search");
 const mappingFilter = document.querySelector("#mapping-filter");
 const mappingStatus = document.querySelector("#mapping-status");
 const mappingBody = document.querySelector("#mapping-body");
+const mappingCategoryOptions = document.querySelector("#mapping-category-options");
 const categoryAddInput = document.querySelector("#category-add-input");
 const categoryAddButton = document.querySelector("#category-add-button");
 const categoryManageSelect = document.querySelector("#category-manage-select");
@@ -644,22 +645,27 @@ async function downloadReportXlsx(report) {
       "순위",
       "검색어",
       "일일 점수 평균",
-      "제품군 분류",
+      "제품군 분류 1",
+      "제품군 분류 2",
       "타깃 분류",
       "",
       "구분",
       "선택 기간 총계"
     ],
-    ...rows.map((row, index) => [
-      row.rank,
-      row.keyword,
-      roundScore(row.dailyAverageRatio),
-      productCategoryFor(row.keyword),
-      targetCategoryFor(row.keyword),
-      "",
-      aggregateCategories[index] || "",
-      aggregateCategories[index] ? roundScore(currentScoreByGroup.get(aggregateCategories[index]) || 0) : ""
-    ])
+    ...rows.map((row, index) => {
+      const categories = productCategoriesFor(row.keyword);
+      return [
+        row.rank,
+        row.keyword,
+        roundScore(row.dailyAverageRatio),
+        categories[0] || "",
+        categories[1] || "",
+        targetCategoryFor(row.keyword),
+        "",
+        aggregateCategories[index] || "",
+        aggregateCategories[index] ? roundScore(currentScoreByGroup.get(aggregateCategories[index]) || 0) : ""
+      ];
+    })
   ];
   const blob = createXlsxBlob("기간별 리포트", xlsxRows);
   const url = URL.createObjectURL(blob);
@@ -735,10 +741,12 @@ function setCategoryMappings(data) {
 
   for (const item of data?.mappings || []) {
     const keyword = String(item.keyword || "").trim();
-    const category = resolveCategoryName(String(item.category || "").trim());
-    if (!keyword || !category) continue;
-    if (!productCategories.includes(category) && category !== "미지정") productCategories.push(category);
-    categoryMappings.set(normalizeText(keyword), { keyword, category });
+    const categories = mappingCategoriesFromItem(item);
+    if (!keyword || !categories.length) continue;
+    for (const category of categories) {
+      if (!productCategories.includes(category) && category !== "미지정") productCategories.push(category);
+    }
+    categoryMappings.set(normalizeText(keyword), categoryMappingRecord(keyword, categories));
   }
 
   if (!productCategories.length) productCategories = [...DEFAULT_PRODUCT_CATEGORIES];
@@ -828,16 +836,16 @@ function renderMappingRows() {
   const search = normalizeText(mappingSearch.value);
   const filter = mappingFilter.value;
   const rows = mappingRows.filter((row) => {
-    const manualCategory = manualCategoryFor(row.keyword);
+    const manualCategories = manualCategoriesFor(row.keyword);
     const suggestion = autoProductCategoryFor(row.keyword);
-    const mapped = Boolean(manualCategory);
+    const mapped = manualCategories.length > 0;
     if (filter === "mapped" && !mapped) return false;
     if (filter === "unmapped" && mapped) return false;
     if (filter === "new" && !row.appearanceType) return false;
     if ((filter === "first" || filter === "returning") && row.appearanceType !== filter) return false;
     return !search
       || normalizeText(row.keyword).includes(search)
-      || normalizeText(manualCategory || suggestion).includes(search);
+      || normalizeText([...manualCategories, suggestion].join(" ")).includes(search);
   });
   const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
 
@@ -858,14 +866,14 @@ function renderMappingRows() {
     const rankCell = document.createElement("td");
     const suggestionCell = document.createElement("td");
     const categoryCell = document.createElement("td");
-    const select = createCategorySelect(row.keyword);
+    const categoryInputs = createCategorySearchGroup(row.keyword);
 
     keywordCell.textContent = row.keyword;
     appearanceCell.innerHTML = row.appearanceType ? newKeywordAppearanceBadge(row.appearanceType) : `<span class="muted-cell">-</span>`;
     monthCell.textContent = row.latestMonth || "-";
     rankCell.textContent = row.latestRank || "-";
     suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(autoProductCategoryFor(row.keyword))}</span>`;
-    categoryCell.append(select);
+    categoryCell.append(categoryInputs);
 
     tr.append(keywordCell, appearanceCell, monthCell, rankCell, suggestionCell, categoryCell);
     fragment.append(tr);
@@ -874,53 +882,98 @@ function renderMappingRows() {
   mappingBody.append(fragment);
 }
 
-function createCategorySelect(keyword, onChange = null) {
-  const select = document.createElement("select");
-  select.className = "category-select";
-  select.dataset.keyword = keyword;
+function createCategorySearchGroup(keyword) {
+  const group = document.createElement("div");
+  group.className = "category-input-group";
+  const inputs = [0, 1].map((slot) => {
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "category-search-input";
+    input.setAttribute("list", "mapping-category-options");
+    input.placeholder = slot === 0 ? "1차 카테고리 검색" : "2차 카테고리 검색";
+    input.setAttribute("aria-label", `${keyword} ${slot + 1}차 카테고리`);
 
-  const emptyOption = document.createElement("option");
-  emptyOption.value = "";
-  emptyOption.textContent = "미지정";
-  select.append(emptyOption);
-
-  for (const category of productCategories) {
-    const option = document.createElement("option");
-    option.value = category;
-    option.textContent = category;
-    select.append(option);
-  }
-
-  select.value = manualCategoryFor(keyword);
-  select.addEventListener("change", () => {
-    updateCategoryMapping(keyword, select.value);
-    if (onChange) {
-      onChange(select.value);
-      return;
-    }
-
-    renderMappingSummary();
-    const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
-    mappingStatus.textContent = `총 ${mappingRows.length}개 · 직접 분류 ${mappedCount}개 · 저장 필요`;
-    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
+    const commit = () => commitCategorySearch(keyword, slot, input, inputs);
+    input.addEventListener("input", () => {
+      input.setCustomValidity("");
+      const exact = exactProductCategory(input.value);
+      if (exact) commit();
+    });
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      commit();
+    });
+    return input;
   });
 
-  return select;
+  group.append(...inputs);
+  syncCategorySearchInputs(keyword, inputs);
+  return group;
 }
 
-function updateCategoryMapping(keyword, category) {
+function commitCategorySearch(keyword, slot, input, inputs) {
+  const query = String(input.value || "").trim();
+  const category = query ? resolveCategorySearch(query) : "";
+  if (query && !category) {
+    input.setCustomValidity("카테고리 후보를 더 입력하거나 자동완성 목록에서 선택해주세요.");
+    input.reportValidity();
+    return;
+  }
+
+  const current = manualCategoriesFor(keyword);
+  const otherCategory = current[slot === 0 ? 1 : 0] || "";
+  if (category && category === otherCategory) {
+    input.setCustomValidity("같은 카테고리를 두 번 지정할 수 없습니다.");
+    input.reportValidity();
+    return;
+  }
+
+  input.setCustomValidity("");
+  updateCategoryMapping(keyword, category, slot);
+  syncCategorySearchInputs(keyword, inputs);
+  renderMappingSummary();
+  const mappedCount = mappingRows.filter((row) => manualCategoriesFor(row.keyword).length).length;
+  mappingStatus.textContent = `총 ${mappingRows.length}개 · 직접 분류 ${mappedCount}개 · 저장 필요`;
+  mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoriesFor(row.keyword).length);
+}
+
+function syncCategorySearchInputs(keyword, inputs) {
+  const categories = manualCategoriesFor(keyword);
+  inputs.forEach((input, index) => {
+    input.value = categories[index] || "";
+    input.title = categories[index] || `${index + 1}차 카테고리 검색`;
+  });
+}
+
+function exactProductCategory(value) {
+  const key = normalizeText(value);
+  return productCategories.find((category) => normalizeText(category) === key) || "";
+}
+
+function resolveCategorySearch(value) {
+  const exact = exactProductCategory(value);
+  if (exact) return exact;
+  const key = normalizeText(value);
+  if (!key) return "";
+  const matches = productCategories.filter((category) => normalizeText(category).includes(key));
+  return matches.length === 1 ? matches[0] : "";
+}
+
+function updateCategoryMapping(keyword, category, slot = 0) {
   const key = normalizeText(keyword);
   if (!key) return;
 
-  if (!category) {
+  const categories = manualCategoriesFor(keyword);
+  categories[slot] = category;
+  const normalized = normalizeAssignedCategories(categories);
+  if (!normalized.length) {
     categoryMappings.delete(key);
     return;
   }
 
-  categoryMappings.set(key, {
-    keyword,
-    category
-  });
+  categoryMappings.set(key, categoryMappingRecord(keyword, normalized));
 }
 
 async function saveCategoryMappingsFromSheet() {
@@ -991,12 +1044,17 @@ function resolveCategoryName(value) {
 function updateCategoryManagerOptions(preferredCategory = "") {
   const current = preferredCategory || categoryManageSelect.value;
   categoryManageSelect.replaceChildren();
+  mappingCategoryOptions.replaceChildren();
 
   for (const category of productCategories) {
     const option = document.createElement("option");
     option.value = category;
     option.textContent = category;
     categoryManageSelect.append(option);
+
+    const searchOption = document.createElement("option");
+    searchOption.value = category;
+    mappingCategoryOptions.append(searchOption);
   }
 
   categoryManageSelect.value = productCategories.includes(current) ? current : productCategories[0] || "";
@@ -1036,7 +1094,8 @@ function renameProductCategory() {
 
   productCategories = productCategories.map((category) => category === previous ? next : category);
   for (const [key, item] of categoryMappings) {
-    if (resolveCategoryName(item.category) === previous) categoryMappings.set(key, { ...item, category: next });
+    const categories = mappingCategoriesFromItem(item).map((category) => category === previous ? next : category);
+    categoryMappings.set(key, categoryMappingRecord(item.keyword, categories));
   }
   for (const [source, target] of categoryAliases) {
     if (target === previous) categoryAliases.set(source, next);
@@ -1057,15 +1116,17 @@ function renameProductCategory() {
 function deleteProductCategory() {
   const category = categoryManageSelect.value;
   if (!category || productCategories.length <= 1) return;
-  const mappedCount = [...categoryMappings.values()].filter((item) => resolveCategoryName(item.category) === category).length;
+  const mappedCount = [...categoryMappings.values()].filter((item) => mappingCategoriesFromItem(item).includes(category)).length;
   const confirmed = window.confirm(
-    `${category} 카테고리를 삭제할까요?\n직접 지정된 ${mappedCount}개 키워드는 미지정 상태로 바뀝니다.`
+    `${category} 카테고리를 삭제할까요?\n${mappedCount}개 키워드에서 이 카테고리만 해제되며, 함께 지정된 다른 카테고리는 유지됩니다.`
   );
   if (!confirmed) return;
 
   productCategories = productCategories.filter((item) => item !== category);
   for (const [key, item] of categoryMappings) {
-    if (resolveCategoryName(item.category) === category) categoryMappings.delete(key);
+    const categories = mappingCategoriesFromItem(item).filter((itemCategory) => itemCategory !== category);
+    if (categories.length) categoryMappings.set(key, categoryMappingRecord(item.keyword, categories));
+    else categoryMappings.delete(key);
   }
   for (const [source, target] of [...categoryAliases]) {
     if (source === category || target === category) categoryAliases.delete(source);
@@ -1081,12 +1142,49 @@ function deleteProductCategory() {
 }
 
 function manualCategoryFor(keyword) {
-  const category = resolveCategoryName(categoryMappings.get(normalizeText(keyword))?.category || "");
-  return productCategories.includes(category) ? category : "";
+  return manualCategoriesFor(keyword)[0] || "";
 }
 
-function productCategoryFor(keyword) {
-  return manualCategoryFor(keyword) || autoProductCategoryFor(keyword);
+function manualCategoriesFor(keyword) {
+  return mappingCategoriesFromItem(categoryMappings.get(normalizeText(keyword)))
+    .filter((category) => productCategories.includes(category));
+}
+
+function mappingCategoriesFromItem(item) {
+  if (!item) return [];
+  const values = Array.isArray(item.categories)
+    ? item.categories
+    : [item.category, item.secondaryCategory];
+  return normalizeAssignedCategories(values.map(resolveCategoryName));
+}
+
+function normalizeAssignedCategories(categories) {
+  const result = [];
+  for (const value of categories || []) {
+    const category = String(value || "").trim();
+    if (!category || result.some((item) => normalizeText(item) === normalizeText(category))) continue;
+    result.push(category);
+    if (result.length === 2) break;
+  }
+  return result;
+}
+
+function categoryMappingRecord(keyword, categories) {
+  const normalized = normalizeAssignedCategories(categories);
+  return {
+    keyword,
+    category: normalized[0] || "",
+    ...(normalized[1] ? { secondaryCategory: normalized[1] } : {})
+  };
+}
+
+function productCategoriesFor(keyword) {
+  const manualCategories = manualCategoriesFor(keyword);
+  return manualCategories.length ? manualCategories : [autoProductCategoryFor(keyword)];
+}
+
+function formatProductCategories(categories) {
+  return normalizeAssignedCategories(categories).join(" · ");
 }
 
 function autoProductCategoryFor(keyword) {
@@ -1165,9 +1263,10 @@ function scoreByProductGroup(rows) {
 
   for (const row of rows || []) {
     const score = Number(row.dailyAverageRatio || 0);
-    const group = productCategoryFor(row.keyword);
     scores.set("총합계", (scores.get("총합계") || 0) + score);
-    scores.set(group, (scores.get(group) || 0) + score);
+    for (const group of productCategoriesFor(row.keyword)) {
+      scores.set(group, (scores.get(group) || 0) + score);
+    }
   }
 
   return scores;
@@ -1262,13 +1361,13 @@ function buildCategoryStatusRows(reports) {
     for (const reportRow of report.rows || []) {
       const key = normalizeText(reportRow.keyword);
       if (!key) continue;
-      const manualCategory = manualCategoryFor(reportRow.keyword);
-      const category = manualCategory || autoProductCategoryFor(reportRow.keyword);
+      const manualCategories = manualCategoriesFor(reportRow.keyword);
+      const categories = manualCategories.length ? manualCategories : [autoProductCategoryFor(reportRow.keyword)];
       const existing = keywordMap.get(key) || {
         key,
         keyword: reportRow.keyword,
-        category,
-        assignmentType: manualCategory ? "manual" : category === "미지정" ? "unmapped" : "automatic",
+        categories,
+        assignmentType: manualCategories.length ? "manual" : categories[0] === "미지정" ? "unmapped" : "automatic",
         periodRanks: Array(reports.length).fill(null),
         latestPeriod: "",
         latestEndDate: "",
@@ -1278,8 +1377,8 @@ function buildCategoryStatusRows(reports) {
       existing.periodRanks[reportIndex] = Number(reportRow.rank) || null;
       if (!existing.latestEndDate || endDate >= existing.latestEndDate) {
         existing.keyword = reportRow.keyword;
-        existing.category = category;
-        existing.assignmentType = manualCategory ? "manual" : category === "미지정" ? "unmapped" : "automatic";
+        existing.categories = categories;
+        existing.assignmentType = manualCategories.length ? "manual" : categories[0] === "미지정" ? "unmapped" : "automatic";
         existing.latestPeriod = report.month;
         existing.latestEndDate = endDate;
         existing.latestRank = Number(reportRow.rank) || null;
@@ -1290,11 +1389,11 @@ function buildCategoryStatusRows(reports) {
 
   const keywords = [...keywordMap.values()];
   const categories = [...productCategories];
-  if (keywords.some((row) => row.category === "미지정")) categories.push("미지정");
+  if (keywords.some((row) => row.categories.includes("미지정"))) categories.push("미지정");
 
   return categories.map((category) => {
     const categoryKeywords = keywords
-      .filter((row) => row.category === category)
+      .filter((row) => row.categories.includes(category))
       .sort((a, b) => Number(a.latestRank || 9999) - Number(b.latestRank || 9999) || a.keyword.localeCompare(b.keyword, "ko"));
     const points = reports.map((_, reportIndex) => {
       const ranks = categoryKeywords
@@ -1898,12 +1997,12 @@ function clearComparisonView(message) {
 
 function buildComparisonCategoryRows(reports, keywordRows) {
   const categories = [...productCategories];
-  if (keywordRows.some((row) => row.category === "미지정")) categories.push("미지정");
+  if (keywordRows.some((row) => row.categories.includes("미지정"))) categories.push("미지정");
   const rows = categories
     .map((category) => {
       const points = reports.map((_, reportIndex) => {
         const ranks = keywordRows
-          .filter((row) => row.category === category && row.points[reportIndex])
+          .filter((row) => row.categories.includes(category) && row.points[reportIndex])
           .map((row) => Number(row.points[reportIndex].rank))
           .filter(Number.isFinite)
           .sort((a, b) => a - b);
@@ -1953,11 +2052,13 @@ function buildComparisonKeywordRows(reports) {
     const latest = points[points.length - 1];
     const keyword = latest?.keyword || previous?.keyword || [...points].reverse().find(Boolean)?.keyword || key;
     const rankDelta = previous && latest ? Number(previous.rank) - Number(latest.rank) : null;
+    const categories = productCategoriesFor(keyword);
 
     return {
       key,
       keyword,
-      category: productCategoryFor(keyword),
+      categories,
+      category: formatProductCategories(categories),
       points,
       previous,
       latest,
@@ -2000,7 +2101,7 @@ function buildLatestRankChanges(reports) {
       if (Math.abs(rankDelta) < LATEST_RANK_CHANGE_THRESHOLD) continue;
       changes.push({
         keyword,
-        category: productCategoryFor(keyword),
+        category: formatProductCategories(productCategoriesFor(keyword)),
         previousRank: Number(previousRow.rank),
         latestRank: Number(latestRow.rank),
         rankDelta,
@@ -2011,7 +2112,7 @@ function buildLatestRankChanges(reports) {
 
     changes.push({
       keyword,
-      category: productCategoryFor(keyword),
+      category: formatProductCategories(productCategoriesFor(keyword)),
       previousRank: previousRow ? Number(previousRow.rank) : null,
       latestRank: latestRow ? Number(latestRow.rank) : null,
       rankDelta: null,

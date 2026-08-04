@@ -211,12 +211,23 @@ function normalizeKeywordCategoryMappings(input = {}) {
 
   for (const item of source || []) {
     const keyword = String(item.keyword || "").trim();
-    const category = String(item.category || "").trim();
-    if (!keyword || !category) continue;
+    const rawCategories = Array.isArray(item.categories)
+      ? item.categories
+      : [item.category, item.secondaryCategory];
+    const mappedCategories = [];
+
+    for (const value of rawCategories) {
+      const category = String(value || "").trim();
+      if (!category || mappedCategories.some((item) => normalizeMappingKey(item) === normalizeMappingKey(category))) continue;
+      mappedCategories.push(category);
+      if (mappedCategories.length === 2) break;
+    }
+    if (!keyword || !mappedCategories.length) continue;
 
     byKeyword.set(normalizeMappingKey(keyword), {
       keyword,
-      category
+      category: mappedCategories[0],
+      ...(mappedCategories[1] ? { secondaryCategory: mappedCategories[1] } : {})
     });
   }
 

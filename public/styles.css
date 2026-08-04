@@ -1080,7 +1080,7 @@ button:disabled {
 
 .mapping-toolbar input,
 .mapping-toolbar select,
-.category-select {
+.category-search-input {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1099,8 +1099,15 @@ button:disabled {
   max-height: 680px;
 }
 
-.category-select {
-  width: min(260px, 100%);
+.category-input-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(170px, 1fr));
+  gap: 8px;
+  min-width: 356px;
+}
+
+.category-search-input {
+  width: 100%;
 }
 
 .mapping-table-wrap td:first-child {
@@ -1109,7 +1116,7 @@ button:disabled {
 }
 
 .mapping-table-wrap td:last-child {
-  width: 280px;
+  width: 420px;
 }
 
 table {
