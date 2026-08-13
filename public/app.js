@@ -333,6 +333,7 @@ async function loadMonths(preferredMonth = null) {
   const { months = [] } = response.ok ? await response.json() : { months: [] };
   reportKeys = applySavedReportOrder(months);
   reportCache = new Map();
+  refreshExecutivePeriodLists();
 
   monthList.replaceChildren();
 
@@ -603,6 +604,7 @@ function moveReportKey(sourceKey, targetKey, position) {
   reportKeys = nextKeys;
   saveReportOrder(reportKeys);
   renderMonthList();
+  refreshExecutivePeriodLists();
   return true;
 }
 
@@ -1711,12 +1713,9 @@ function saveTrendSeriesSelection() {
 
 async function renderComparisonSheet(options = {}) {
   initializeComparisonSelection();
-  initializeExecutivePeriodSelection();
   pruneComparisonSelection();
-  pruneExecutivePeriodSelection();
   if (!options.keepPeriodList) {
     renderComparisonPeriodList();
-    renderExecutivePeriodLists();
   }
 
   const selectedKeys = chronologicalReportKeys(reportKeys.filter((key) => comparisonSelectedKeys.has(key)));
@@ -1991,11 +1990,17 @@ function renderComparisonPeriodList() {
 }
 
 function initializeExecutivePeriodSelection() {
-  if (executivePeriodSelectionLoaded) return;
+  if (executivePeriodSelectionLoaded && (executiveBaselineKeys.size || executiveCurrentKeys.size)) return;
   executivePeriodSelectionLoaded = true;
   const chronological = chronologicalReportKeys(reportKeys);
   executiveBaselineKeys = new Set(chronological.slice(-2, -1));
   executiveCurrentKeys = new Set(chronological.slice(-1));
+}
+
+function refreshExecutivePeriodLists() {
+  initializeExecutivePeriodSelection();
+  pruneExecutivePeriodSelection();
+  renderExecutivePeriodLists();
 }
 
 function pruneExecutivePeriodSelection() {

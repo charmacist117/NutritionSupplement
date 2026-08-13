@@ -78,6 +78,26 @@
           </section>
         </section>
 
+        <section class="executive-report-builder" aria-labelledby="executive-report-title">
+          <div class="section-heading executive-report-heading">
+            <div>
+              <h2 id="executive-report-title">경영진 인사이트 보고서</h2>
+              <p>기준 구간과 비교 구간을 각각 선택하면 순위 구조, 카테고리 분포, 급등락 및 신규 진입을 PDF로 정리합니다.</p>
+            </div>
+            <button id="executive-pdf-download" type="button" disabled>경영진 PDF</button>
+          </div>
+          <div class="executive-period-groups">
+            <fieldset>
+              <legend>첫 번째 기간 · 기준 구간</legend>
+              <div id="executive-baseline-periods" class="executive-period-list"></div>
+            </fieldset>
+            <fieldset>
+              <legend>두 번째 기간 · 비교 구간</legend>
+              <div id="executive-current-periods" class="executive-period-list"></div>
+            </fieldset>
+          </div>
+          <p id="executive-report-status" class="comparison-status">기본값은 최신월과 그 직전월입니다.</p>
+        </section>
       </div>
 
       <section class="mapping-panel tab-view" data-tab-view="mapping">
@@ -272,27 +292,6 @@
           <div id="comparison-period-list" class="comparison-period-list"></div>
         </fieldset>
         <p id="comparison-status" class="comparison-status">비교할 기간을 2개 이상 선택해주세요.</p>
-
-        <section class="executive-report-builder" aria-labelledby="executive-report-title">
-          <div class="section-heading executive-report-heading">
-            <div>
-              <h2 id="executive-report-title">경영진 인사이트 보고서</h2>
-              <p>기준 구간과 비교 구간을 각각 선택하면 순위 구조, 카테고리 분포, 급등락 및 신규 진입을 PDF로 정리합니다.</p>
-            </div>
-            <button id="executive-pdf-download" type="button" disabled>경영진 PDF</button>
-          </div>
-          <div class="executive-period-groups">
-            <fieldset>
-              <legend>첫 번째 기간 · 기준 구간</legend>
-              <div id="executive-baseline-periods" class="executive-period-list"></div>
-            </fieldset>
-            <fieldset>
-              <legend>두 번째 기간 · 비교 구간</legend>
-              <div id="executive-current-periods" class="executive-period-list"></div>
-            </fieldset>
-          </div>
-          <p id="executive-report-status" class="comparison-status">기본값은 최신월과 그 직전월입니다.</p>
-        </section>
 
         <div id="comparison-summary" class="comparison-summary"></div>
 
