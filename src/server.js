@@ -7,6 +7,7 @@ import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMont
 import { fetchKeywordTrends, getNaverCredentialCount, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
+import { createExecutiveReportPdf } from "./executiveReport.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -49,6 +50,17 @@ const server = createServer(async (request, response) => {
       });
 
       return sendJson(response, 200, result);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/executive-report") {
+      const body = await readJson(request);
+      const pdf = await createExecutiveReportPdf(body);
+      response.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="health-market-report.pdf"',
+        "Content-Length": pdf.length
+      });
+      return response.end(pdf);
     }
 
     if (request.method === "GET" && url.pathname === "/api/monthly-reports") {

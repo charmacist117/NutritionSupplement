@@ -40,9 +40,18 @@
 
 Vercel에는 Blob 저장소를 연결해야 기간별 리포트가 배포 환경에 지속 저장됩니다.
 
+## 경영진 PDF 보고서
+
+`기간별 비교` 탭에서 첫 번째 기준 구간과 두 번째 비교 구간을 각각 선택해 경영진용 PDF를 생성할 수 있습니다. 기본값은 최신 저장 자료와 바로 이전 저장 자료입니다.
+
+- 여러 월을 한 구간으로 선택하면 월별 검색 순위를 평균하고, 미등장 월은 501위로 반영한 뒤 구간별 TOP 500을 다시 산정합니다.
+- 핵심 요약, TOP 20, 카테고리별 TOP 100·TOP 500 변화, 급등락, 신규 TOP 100, 전략적 검토 사항을 7쪽 A4 보고서로 구성합니다.
+- 기간 간 상대 클릭 점수는 비교에 사용하지 않습니다.
+
 ## 주요 API
 
 - `GET /api/monthly-reports`: 저장된 기간 목록
 - `GET /api/monthly-report?month=YYYY-MM 또는 YYYY-MM-DD_YYYY-MM-DD`: 특정 기간 리포트
 - `GET /api/health`: 배포 설정 상태
 - `POST /api/collect-monthly`: 선택 기간 리포트 수집 및 저장
+- `POST /api/executive-report`: 선택한 두 구간의 순위 기반 경영진 PDF 생성

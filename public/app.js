@@ -48,6 +48,10 @@ const comparisonSelectAllButton = document.querySelector("#comparison-select-all
 const comparisonClearButton = document.querySelector("#comparison-clear");
 const comparisonEmailCopyButton = document.querySelector("#comparison-email-copy");
 const comparisonDownloadButton = document.querySelector("#comparison-download");
+const executivePdfDownloadButton = document.querySelector("#executive-pdf-download");
+const executiveBaselinePeriods = document.querySelector("#executive-baseline-periods");
+const executiveCurrentPeriods = document.querySelector("#executive-current-periods");
+const executiveReportStatus = document.querySelector("#executive-report-status");
 const comparisonModeButtons = [...document.querySelectorAll("[data-comparison-mode]")];
 const comparisonPeriodList = document.querySelector("#comparison-period-list");
 const comparisonStatus = document.querySelector("#comparison-status");
@@ -141,6 +145,9 @@ let comparisonCategoryRows = [];
 let comparisonKeywordRows = [];
 let comparisonLatestChanges = [];
 let comparisonMode = readComparisonMode();
+let executivePeriodSelectionLoaded = false;
+let executiveBaselineKeys = new Set();
+let executiveCurrentKeys = new Set();
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -235,10 +242,14 @@ comparisonPeriodList.addEventListener("change", async (event) => {
   await renderComparisonSheet({ keepPeriodList: true });
 });
 
+executiveBaselinePeriods.addEventListener("change", (event) => updateExecutivePeriodSelection(event, executiveBaselineKeys));
+executiveCurrentPeriods.addEventListener("change", (event) => updateExecutivePeriodSelection(event, executiveCurrentKeys));
+
 comparisonKeywordSearch.addEventListener("input", () => renderComparisonKeywordRows());
 comparisonKeywordFilter.addEventListener("change", () => renderComparisonKeywordRows());
 
 comparisonDownloadButton.addEventListener("click", () => downloadComparisonXlsx());
+executivePdfDownloadButton.addEventListener("click", () => downloadExecutivePdf());
 comparisonEmailCopyButton.addEventListener("click", () => copyComparisonEmail());
 
 for (const button of comparisonModeButtons) {
@@ -1700,8 +1711,13 @@ function saveTrendSeriesSelection() {
 
 async function renderComparisonSheet(options = {}) {
   initializeComparisonSelection();
+  initializeExecutivePeriodSelection();
   pruneComparisonSelection();
-  if (!options.keepPeriodList) renderComparisonPeriodList();
+  pruneExecutivePeriodSelection();
+  if (!options.keepPeriodList) {
+    renderComparisonPeriodList();
+    renderExecutivePeriodLists();
+  }
 
   const selectedKeys = chronologicalReportKeys(reportKeys.filter((key) => comparisonSelectedKeys.has(key)));
   const modeConfig = COMPARISON_MODES[comparisonMode];
@@ -1972,6 +1988,134 @@ function renderComparisonPeriodList() {
   }
 
   comparisonPeriodList.append(fragment);
+}
+
+function initializeExecutivePeriodSelection() {
+  if (executivePeriodSelectionLoaded) return;
+  executivePeriodSelectionLoaded = true;
+  const chronological = chronologicalReportKeys(reportKeys);
+  executiveBaselineKeys = new Set(chronological.slice(-2, -1));
+  executiveCurrentKeys = new Set(chronological.slice(-1));
+}
+
+function pruneExecutivePeriodSelection() {
+  const validKeys = new Set(reportKeys);
+  executiveBaselineKeys = new Set([...executiveBaselineKeys].filter((key) => validKeys.has(key)));
+  executiveCurrentKeys = new Set([...executiveCurrentKeys].filter((key) => validKeys.has(key)));
+  updateExecutiveReportState();
+}
+
+function renderExecutivePeriodLists() {
+  renderExecutivePeriodList(executiveBaselinePeriods, executiveBaselineKeys, "baseline");
+  renderExecutivePeriodList(executiveCurrentPeriods, executiveCurrentKeys, "current");
+  updateExecutiveReportState();
+}
+
+function renderExecutivePeriodList(container, selectedKeys, group) {
+  container.replaceChildren();
+  if (!reportKeys.length) {
+    container.innerHTML = `<p class="empty">저장된 자료가 없습니다.</p>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const key of reportKeys) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    const text = document.createElement("span");
+    label.className = "executive-period-option";
+    input.type = "checkbox";
+    input.dataset.executiveGroup = group;
+    input.dataset.reportKey = key;
+    input.checked = selectedKeys.has(key);
+    text.textContent = periodLabel(key);
+    label.append(input, text);
+    fragment.append(label);
+  }
+  container.append(fragment);
+}
+
+function updateExecutivePeriodSelection(event, targetSet) {
+  const input = event.target.closest("input[data-report-key]");
+  if (!input) return;
+  if (input.checked) targetSet.add(input.dataset.reportKey);
+  else targetSet.delete(input.dataset.reportKey);
+  updateExecutiveReportState();
+}
+
+function updateExecutiveReportState() {
+  const baseline = chronologicalReportKeys([...executiveBaselineKeys]);
+  const current = chronologicalReportKeys([...executiveCurrentKeys]);
+  const overlap = baseline.filter((key) => executiveCurrentKeys.has(key));
+  const baselineEnd = baseline.length ? reportSortValue(baseline.at(-1)) : "";
+  const currentStart = current.length ? reportSortValue(current[0]) : "";
+  const valid = baseline.length > 0 && current.length > 0 && !overlap.length && baselineEnd < currentStart;
+  executivePdfDownloadButton.disabled = !valid;
+
+  if (!baseline.length || !current.length) {
+    executiveReportStatus.textContent = "두 구간에 저장 자료를 각각 1개 이상 선택해주세요.";
+  } else if (overlap.length) {
+    executiveReportStatus.textContent = "같은 저장 자료를 두 구간에 중복 선택할 수 없습니다.";
+  } else if (baselineEnd >= currentStart) {
+    executiveReportStatus.textContent = "첫 번째 기간은 두 번째 기간보다 앞선 자료로 구성해주세요.";
+  } else {
+    executiveReportStatus.textContent = `기준 ${baseline.length}개 자료와 비교 ${current.length}개 자료를 순위 기준으로 분석합니다.`;
+  }
+}
+
+async function downloadExecutivePdf() {
+  if (executivePdfDownloadButton.disabled) return;
+  const baselineKeys = chronologicalReportKeys([...executiveBaselineKeys]);
+  const currentKeys = chronologicalReportKeys([...executiveCurrentKeys]);
+  executivePdfDownloadButton.disabled = true;
+  const originalText = executivePdfDownloadButton.textContent;
+  executivePdfDownloadButton.textContent = "PDF 작성 중";
+  executiveReportStatus.textContent = "선택한 두 구간의 순위를 분석해 보고서를 작성하고 있습니다.";
+
+  try {
+    const [baselineReports, currentReports] = await Promise.all([
+      Promise.all(baselineKeys.map((key) => fetchReport(key))),
+      Promise.all(currentKeys.map((key) => fetchReport(key)))
+    ]);
+    const prepareReports = (reports) => reports.filter(Boolean).map((report) => ({
+      month: report.month,
+      startDate: report.startDate,
+      endDate: report.endDate,
+      rows: (report.rows || []).map((row) => ({
+        rank: Number(row.rank),
+        keyword: row.keyword,
+        categories: productCategoriesFor(row.keyword)
+      }))
+    }));
+    const response = await fetch("/api/executive-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        baselineReports: prepareReports(baselineReports),
+        currentReports: prepareReports(currentReports)
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || "경영진 PDF 생성에 실패했습니다.");
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `health_market_${safeFileName(baselineKeys[0])}_${safeFileName(currentKeys.at(-1))}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    executiveReportStatus.textContent = "경영진 인사이트 PDF를 생성했습니다.";
+  } catch (error) {
+    executiveReportStatus.textContent = error.message;
+  } finally {
+    executivePdfDownloadButton.textContent = originalText;
+    updateExecutiveReportState();
+  }
 }
 
 function clearComparisonView(message) {

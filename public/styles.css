@@ -481,6 +481,69 @@ button:disabled {
   font-size: 13px;
 }
 
+.executive-report-builder {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.executive-report-heading {
+  align-items: center;
+}
+
+.executive-period-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.executive-period-groups fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.executive-period-groups legend {
+  padding: 0 6px;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.executive-period-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 184px;
+  overflow-y: auto;
+}
+
+.executive-period-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.executive-period-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent-strong);
+}
+
+.executive-period-option span {
+  overflow-wrap: anywhere;
+}
+
 .comparison-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1228,6 +1291,11 @@ td:last-child {
   }
 
   .comparison-period-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .executive-period-groups,
+  .executive-period-list {
     grid-template-columns: minmax(0, 1fr);
   }
 }
