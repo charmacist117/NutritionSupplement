@@ -1,6 +1,6 @@
 import { createExecutiveReportPdf } from "../src/executiveReport.js";
 
-export const config = { maxDuration: 60 };
+export const config = { maxDuration: 300 };
 
 export default async function handler(request, response) {
   if (request.method !== "POST") return response.status(405).json({ error: "Method not allowed" });
