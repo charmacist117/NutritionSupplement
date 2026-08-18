@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
-import { fetchKeywordTrends, getNaverCredentialCount, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport } from "./storage.js";
+import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, getNaverCredentialProfiles, NaverShoppingInsightError } from "./naverShoppingInsight.js";
+import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createExecutiveReportPdf } from "./executiveReport.js";
 
@@ -22,10 +22,17 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/health") {
       const naverCredentialCount = safeNaverCredentialCount();
+      const profiles = getNaverCredentialProfiles();
+      const settings = await getNaverApiSettings({ outputDir: join(rootDir, "data", "settings") });
+      const preferredProfile = settings.activeProfile || String(process.env.NAVER_ACTIVE_PROFILE || "").trim().toLowerCase();
+      const activeProfile = profiles.some((item) => item.profile === preferredProfile) ? preferredProfile : profiles[0]?.profile || "";
       return sendJson(response, 200, {
         ok: true,
         naverConfigured: naverCredentialCount > 0,
         naverCredentialCount,
+        naverActiveProfile: activeProfile,
+        naverActiveProfileLabel: profiles.find((item) => item.profile === activeProfile)?.label || "",
+        naverActiveCredentialCount: getNaverCredentialPool(process.env, activeProfile).length,
         blobConfigured: hasBlobCredentials(),
         category: HEALTH_FOOD_CATEGORY
       });
@@ -33,7 +40,9 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && (url.pathname === "/api/shopping/keywords" || url.pathname === "/api/shopping-keywords")) {
       const body = await readJson(request);
-      const result = await fetchKeywordTrends(body);
+      const settings = await getNaverApiSettings({ outputDir: join(rootDir, "data", "settings") });
+      const activeProfile = settings.activeProfile || process.env.NAVER_ACTIVE_PROFILE || getNaverCredentialProfiles()[0]?.profile || "";
+      const result = await fetchKeywordTrends(body, getNaverCredentialPool(process.env, activeProfile));
 
       return sendJson(response, 200, result);
     }
@@ -43,13 +52,33 @@ const server = createServer(async (request, response) => {
       const range = body.startDate && body.endDate
         ? normalizeCollectionRange({ startDate: body.startDate, endDate: body.endDate })
         : body.range || previousMonthRange();
+      const settings = await getNaverApiSettings({ outputDir: join(rootDir, "data", "settings") });
+      const activeProfile = settings.activeProfile || process.env.NAVER_ACTIVE_PROFILE || getNaverCredentialProfiles()[0]?.profile || "";
       const result = await collectMonthlyNutritionKeywords({
         range,
+        credentials: getNaverCredentialPool(process.env, activeProfile),
         outputDir: join(rootDir, "data", "monthly"),
         popularKeywordFile: body.popularKeywordFile
       });
 
       return sendJson(response, 200, result);
+    }
+
+    if (url.pathname === "/api/naver-api-settings") {
+      const options = { outputDir: join(rootDir, "data", "settings") };
+      const profiles = getNaverCredentialProfiles();
+      let settings = await getNaverApiSettings(options);
+      if (request.method === "PUT") {
+        const body = await readJson(request);
+        const activeProfile = String(body.activeProfile || "").trim().toLowerCase();
+        if (!profiles.some((item) => item.profile === activeProfile)) return sendJson(response, 400, { error: "등록되지 않은 네이버 API 프로필입니다." });
+        settings = await saveNaverApiSettings({ activeProfile }, options);
+      }
+      if (["GET", "PUT"].includes(request.method)) {
+        const preferredProfile = settings.activeProfile || String(process.env.NAVER_ACTIVE_PROFILE || "").trim().toLowerCase();
+        const activeProfile = profiles.some((item) => item.profile === preferredProfile) ? preferredProfile : profiles[0]?.profile || "";
+        return sendJson(response, 200, { activeProfile, updatedAt: settings.updatedAt, profiles, secretStorage: "environment-variables" });
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/api/executive-report") {

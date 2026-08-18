@@ -4,6 +4,7 @@ import { join } from "node:path";
 const MONTHLY_PREFIX = "monthly";
 const SETTINGS_PREFIX = "settings";
 const KEYWORD_CATEGORY_MAPPINGS_PATH = `${SETTINGS_PREFIX}/keyword-category-mappings.json`;
+const NAVER_API_SETTINGS_PATH = `${SETTINGS_PREFIX}/naver-api-settings.json`;
 const BLOB_ACCESS = "private";
 
 export async function saveMonthlyReport(result, options = {}) {
@@ -158,6 +159,41 @@ export async function saveKeywordCategoryMappings(input, options = {}) {
   return payload;
 }
 
+export async function getNaverApiSettings(options = {}) {
+  if (shouldUseBlob()) {
+    const text = await getBlobText(NAVER_API_SETTINGS_PATH);
+    return text ? normalizeNaverApiSettings(JSON.parse(text)) : normalizeNaverApiSettings();
+  }
+
+  try {
+    const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
+    const text = await readFile(join(outputDir, "naver-api-settings.json"), "utf8");
+    return normalizeNaverApiSettings(JSON.parse(text));
+  } catch {
+    return normalizeNaverApiSettings();
+  }
+}
+
+export async function saveNaverApiSettings(input, options = {}) {
+  const payload = { ...normalizeNaverApiSettings(input), updatedAt: new Date().toISOString() };
+
+  if (shouldUseBlob()) {
+    const { put } = await import("@vercel/blob");
+    await put(NAVER_API_SETTINGS_PATH, JSON.stringify(payload, null, 2), {
+      access: BLOB_ACCESS,
+      allowOverwrite: true,
+      contentType: "application/json"
+    });
+    return payload;
+  }
+
+  if (process.env.VERCEL) throw new Error("Blob 저장소가 연결되어야 활성 API 프로필을 저장할 수 있습니다.");
+  const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, "naver-api-settings.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return payload;
+}
+
 function shouldUseBlob() {
   return hasBlobCredentials();
 }
@@ -236,6 +272,13 @@ function normalizeKeywordCategoryMappings(input = {}) {
     categories,
     categoryAliases,
     mappings: [...byKeyword.values()].sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"))
+  };
+}
+
+function normalizeNaverApiSettings(input = {}) {
+  return {
+    activeProfile: String(input.activeProfile || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 40),
+    updatedAt: input.updatedAt || null
   };
 }
 

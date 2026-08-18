@@ -68,6 +68,12 @@ const comparisonKeywordFilter = document.querySelector("#comparison-keyword-filt
 const comparisonKeywordStatus = document.querySelector("#comparison-keyword-status");
 const comparisonKeywordHead = document.querySelector("#comparison-keyword-head");
 const comparisonKeywordBody = document.querySelector("#comparison-keyword-body");
+const apiSettingsRefreshButton = document.querySelector("#api-settings-refresh");
+const apiSettingsSummary = document.querySelector("#api-settings-summary");
+const apiActiveProfile = document.querySelector("#api-active-profile");
+const apiProfileSaveButton = document.querySelector("#api-profile-save");
+const apiSettingsStatus = document.querySelector("#api-settings-status");
+const apiProfileBody = document.querySelector("#api-profile-body");
 const DEFAULT_PRODUCT_CATEGORIES = [
   "오메가3",
   "마그네슘",
@@ -251,6 +257,11 @@ comparisonKeywordFilter.addEventListener("change", () => renderComparisonKeyword
 comparisonDownloadButton.addEventListener("click", () => downloadComparisonXlsx());
 executivePdfDownloadButton.addEventListener("click", () => downloadExecutivePdf());
 comparisonEmailCopyButton.addEventListener("click", () => copyComparisonEmail());
+apiSettingsRefreshButton.addEventListener("click", () => loadApiSettings());
+apiActiveProfile.addEventListener("change", () => {
+  apiProfileSaveButton.disabled = !apiActiveProfile.value;
+});
+apiProfileSaveButton.addEventListener("click", () => saveActiveApiProfile());
 
 for (const button of comparisonModeButtons) {
   button.addEventListener("click", async () => {
@@ -322,9 +333,78 @@ async function loadHealth() {
       return;
     }
 
-    statusText.textContent = `수집 준비가 완료되었습니다. 네이버 API 키 ${health.naverCredentialCount || 1}개를 사용할 수 있습니다.`;
+    const profileText = health.naverActiveProfileLabel ? `${health.naverActiveProfileLabel} · ` : "";
+    statusText.textContent = `수집 준비가 완료되었습니다. ${profileText}API 키 ${health.naverActiveCredentialCount || health.naverCredentialCount || 1}개를 사용합니다.`;
   } catch {
     statusText.textContent = "설정 상태를 확인하지 못했습니다.";
+  }
+}
+
+async function loadApiSettings() {
+  apiSettingsStatus.textContent = "등록된 네이버 API 프로필을 확인하는 중입니다.";
+  apiProfileSaveButton.disabled = true;
+
+  try {
+    const response = await fetch("/api/naver-api-settings");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "API 설정을 불러오지 못했습니다.");
+
+    const profiles = data.profiles || [];
+    apiActiveProfile.replaceChildren();
+    for (const profile of profiles) {
+      const option = document.createElement("option");
+      option.value = profile.profile;
+      option.textContent = `${profile.label} (${profile.credentialCount}개)`;
+      option.selected = profile.profile === data.activeProfile;
+      apiActiveProfile.append(option);
+    }
+
+    apiSettingsSummary.innerHTML = `
+      <div><span>활성 프로필</span><strong>${escapeHtml(profiles.find((item) => item.profile === data.activeProfile)?.label || "미등록")}</strong></div>
+      <div><span>등록 프로필</span><strong>${profiles.length}개</strong></div>
+      <div><span>등록 API 키</span><strong>${profiles.reduce((sum, item) => sum + item.credentialCount, 0)}개</strong></div>
+      <div><span>비밀키 저장</span><strong>Vercel 환경변수</strong></div>`;
+
+    apiProfileBody.replaceChildren();
+    for (const profile of profiles) {
+      for (const [index, credential] of profile.credentials.entries()) {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${index === 0 ? escapeHtml(profile.label) : ""}</td>
+          <td>${escapeHtml(credential.name)}</td>
+          <td><code>${escapeHtml(credential.clientIdHint)}</code></td>
+          <td>${profile.profile === data.activeProfile ? '<span class="status-badge active">사용 중</span>' : '<span class="status-badge">대기</span>'}</td>`;
+        apiProfileBody.append(row);
+      }
+    }
+    if (!profiles.length) apiProfileBody.innerHTML = '<tr><td colspan="4">Vercel에 등록된 네이버 API 키가 없습니다.</td></tr>';
+    apiActiveProfile.disabled = !profiles.length;
+    apiProfileSaveButton.disabled = !profiles.length;
+    apiSettingsStatus.textContent = profiles.length
+      ? "활성 프로필을 변경하면 다음 데이터 수집부터 해당 프로필의 키만 사용합니다."
+      : "먼저 Vercel 환경변수에 네이버 API 키를 등록해주세요.";
+  } catch (error) {
+    apiSettingsStatus.textContent = error.message;
+  }
+}
+
+async function saveActiveApiProfile() {
+  apiProfileSaveButton.disabled = true;
+  apiSettingsStatus.textContent = "활성 프로필을 저장하는 중입니다.";
+  try {
+    const response = await fetch("/api/naver-api-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeProfile: apiActiveProfile.value })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "활성 프로필을 저장하지 못했습니다.");
+    await loadHealth();
+    await loadApiSettings();
+    apiSettingsStatus.textContent = "활성 프로필을 저장했습니다. 다음 수집부터 적용됩니다.";
+  } catch (error) {
+    apiSettingsStatus.textContent = error.message;
+    apiProfileSaveButton.disabled = false;
   }
 }
 
@@ -407,6 +487,7 @@ async function setActiveTab(tab) {
   if (tab === "mapping") await renderMappingSheet();
   if (tab === "category-status") await renderCategoryStatusSheet();
   if (tab === "comparison") await renderComparisonSheet();
+  if (tab === "settings") await loadApiSettings();
 }
 
 function activeTab() {

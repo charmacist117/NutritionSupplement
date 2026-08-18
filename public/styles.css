@@ -488,6 +488,120 @@ button:disabled {
   background: #fff;
 }
 
+.settings-panel {
+  padding: 20px;
+  border: 1px solid #d7e0ea;
+  background: #fff;
+}
+
+.settings-header,
+.api-profile-settings {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-header h2,
+.environment-reference h3 {
+  margin: 0 0 6px;
+}
+
+.settings-header p,
+.api-profile-settings p {
+  margin: 0;
+  color: #667482;
+  font-size: 12px;
+}
+
+.settings-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 22px 0;
+  border: 1px solid #d7e0ea;
+}
+
+.settings-summary div {
+  padding: 16px;
+  border-right: 1px solid #d7e0ea;
+}
+
+.settings-summary div:last-child {
+  border-right: 0;
+}
+
+.settings-summary span,
+.settings-summary strong {
+  display: block;
+}
+
+.settings-summary span {
+  margin-bottom: 5px;
+  color: #667482;
+  font-size: 11px;
+}
+
+.api-profile-settings {
+  justify-content: flex-start;
+  padding: 16px;
+  border: 1px solid #d7e0ea;
+  background: #f8fafc;
+}
+
+.api-profile-settings label {
+  display: grid;
+  gap: 6px;
+  min-width: 280px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.api-profile-settings p {
+  margin-left: auto;
+}
+
+.settings-table-wrap {
+  margin-top: 16px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 3px 7px;
+  color: #667482;
+  background: #edf1f5;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-badge.active {
+  color: #08753c;
+  background: #e8f6ee;
+}
+
+.environment-reference {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #d7e0ea;
+}
+
+.environment-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, .7fr) 1fr;
+  border: 1px solid #d7e0ea;
+}
+
+.environment-grid code,
+.environment-grid span {
+  padding: 10px 12px;
+  border-bottom: 1px solid #d7e0ea;
+  font-size: 12px;
+}
+
+.environment-grid code {
+  background: #f4f7f9;
+  color: #17202a;
+}
+
 .executive-report-heading {
   align-items: center;
 }
@@ -1219,6 +1333,8 @@ td:last-child {
   .mapping-header,
   .comparison-header,
   .category-status-header,
+  .settings-header,
+  .api-profile-settings,
   .section-heading {
     display: grid;
   }
@@ -1286,6 +1402,7 @@ td:last-child {
   .latest-change-summary,
   .mapping-summary,
   .category-status-summary,
+  .settings-summary,
   .comparison-filters {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1296,6 +1413,14 @@ td:last-child {
 
   .executive-period-groups,
   .executive-period-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .api-profile-settings p {
+    margin-left: 0;
+  }
+
+  .environment-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

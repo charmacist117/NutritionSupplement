@@ -37,7 +37,8 @@ export function normalizeCollectionRange(input = {}) {
 }
 
 export async function collectMonthlyNutritionKeywords(options = {}) {
-  assertNaverCredentials();
+  const credentials = options.credentials;
+  assertNaverCredentials(credentials);
 
   const range = options.range || previousMonthRange();
   const category = options.category || HEALTH_FOOD_CATEGORY.id;
@@ -51,12 +52,13 @@ export async function collectMonthlyNutritionKeywords(options = {}) {
   validatePopularKeywords(popularKeywords, options.limit || 500);
 
   const topKeywords = popularKeywords.slice(0, 5).map((item) => item.keyword);
-  const anchor = await chooseAnchorKeyword({ category, range, keywords: topKeywords });
+  const anchor = await chooseAnchorKeyword({ category, range, keywords: topKeywords, credentials });
   const rows = await scoreKeywordsAgainstAnchor({
     category,
     range,
     anchorKeyword: anchor.keyword,
-    popularKeywords
+    popularKeywords,
+    credentials
   });
 
   const result = {
@@ -101,14 +103,14 @@ async function loadPopularKeywords(filePath, request) {
   }
 }
 
-async function chooseAnchorKeyword({ category, range, keywords }) {
+async function chooseAnchorKeyword({ category, range, keywords, credentials }) {
   const result = await fetchKeywordTrends({
     category,
     keywords,
     startDate: range.startDate,
     endDate: range.endDate,
     timeUnit: "date"
-  });
+  }, credentials);
 
   const candidates = (result.results || []).map((series) => {
     const maxDailyRatio = Math.max(0, ...(series.data || []).map((point) => displayScore(point.ratio)));
@@ -124,7 +126,7 @@ async function chooseAnchorKeyword({ category, range, keywords }) {
   };
 }
 
-async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popularKeywords }) {
+async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popularKeywords, credentials }) {
   const byKeyword = new Map(popularKeywords.map((item) => [item.keyword, { ...item, dailyAverageRatio: null, points: [] }]));
   const comparisonTargets = popularKeywords.map((item) => item.keyword).filter((keyword) => keyword !== anchorKeyword);
 
@@ -136,7 +138,7 @@ async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popu
       startDate: range.startDate,
       endDate: range.endDate,
       timeUnit: "date"
-    });
+    }, credentials);
 
     for (const series of result.results || []) {
       const row = byKeyword.get(series.title);
@@ -156,7 +158,7 @@ async function scoreKeywordsAgainstAnchor({ category, range, anchorKeyword, popu
       startDate: range.startDate,
       endDate: range.endDate,
       timeUnit: "date"
-    });
+    }, credentials);
     const series = anchorResult.results?.[0];
     anchorRow.points = dailyPoints(series?.data || [], range);
     anchorRow.dailyAverageRatio = average(anchorRow.points.map((point) => point.ratio));

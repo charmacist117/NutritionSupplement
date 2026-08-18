@@ -23,24 +23,48 @@ export function getNaverCredentials(env = process.env) {
   };
 }
 
-export function getNaverCredentialPool(env = process.env) {
+export function getNaverCredentialPool(env = process.env, activeProfile = undefined) {
   const credentials = [];
 
   for (const item of parseNaverClientsJson(env.NAVER_CLIENTS_JSON)) {
-    addCredential(credentials, item.clientId || item.NAVER_CLIENT_ID || item.id, item.clientSecret || item.NAVER_CLIENT_SECRET || item.secret);
+    addCredential(credentials, item.clientId || item.NAVER_CLIENT_ID || item.id, item.clientSecret || item.NAVER_CLIENT_SECRET || item.secret, item);
   }
 
   for (let index = 1; index <= 20; index += 1) {
-    addCredential(credentials, env[`NAVER_CLIENT_ID_${index}`], env[`NAVER_CLIENT_SECRET_${index}`]);
+    addCredential(credentials, env[`NAVER_CLIENT_ID_${index}`], env[`NAVER_CLIENT_SECRET_${index}`], {
+      profile: env[`NAVER_CLIENT_PROFILE_${index}`],
+      profileLabel: env[`NAVER_CLIENT_PROFILE_LABEL_${index}`],
+      name: env[`NAVER_CLIENT_NAME_${index}`]
+    });
   }
 
-  addCredential(credentials, env.NAVER_CLIENT_ID, env.NAVER_CLIENT_SECRET);
+  addCredential(credentials, env.NAVER_CLIENT_ID, env.NAVER_CLIENT_SECRET, {
+    profile: env.NAVER_CLIENT_PROFILE,
+    profileLabel: env.NAVER_CLIENT_PROFILE_LABEL,
+    name: env.NAVER_CLIENT_NAME
+  });
 
-  return dedupeCredentials(credentials);
+  const unique = dedupeCredentials(credentials);
+  const profile = normalizeProfile(activeProfile === undefined ? env.NAVER_ACTIVE_PROFILE : activeProfile);
+  return profile ? unique.filter((item) => item.profile === profile) : unique;
 }
 
 export function getNaverCredentialCount(env = process.env) {
   return getNaverCredentialPool(env).length;
+}
+
+export function getNaverCredentialProfiles(env = process.env) {
+  const profiles = new Map();
+  for (const credential of getNaverCredentialPool(env, "")) {
+    const current = profiles.get(credential.profile) || {
+      profile: credential.profile,
+      label: credential.profileLabel,
+      credentials: []
+    };
+    current.credentials.push({ name: credential.name, clientIdHint: maskClientId(credential.clientId) });
+    profiles.set(credential.profile, current);
+  }
+  return [...profiles.values()].map((item) => ({ ...item, credentialCount: item.credentials.length }));
 }
 
 export function assertNaverCredentials(credentials = getNaverCredentialPool()) {
@@ -214,14 +238,18 @@ function parseNaverClientsJson(value) {
   }
 }
 
-function addCredential(credentials, clientId, clientSecret) {
+function addCredential(credentials, clientId, clientSecret, metadata = {}) {
   const id = String(clientId || "").trim();
   const secret = String(clientSecret || "").trim();
   if (!id || !secret) return;
+  const profile = normalizeProfile(metadata.profile) || "default";
 
   credentials.push({
     clientId: id,
-    clientSecret: secret
+    clientSecret: secret,
+    profile,
+    profileLabel: String(metadata.profileLabel || "").trim() || (profile === "default" ? "기본 계정" : profile),
+    name: String(metadata.name || "").trim() || `API 키 ${credentials.length + 1}`
   });
 }
 
@@ -243,6 +271,16 @@ function normalizeCredentialPool(credentials) {
   if (Array.isArray(credentials)) return credentials.filter((item) => item?.clientId && item?.clientSecret);
   if (credentials?.clientId && credentials?.clientSecret) return [credentials];
   return [];
+}
+
+function normalizeProfile(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 40);
+}
+
+function maskClientId(value) {
+  const text = String(value || "");
+  if (text.length <= 4) return "****";
+  return `${text.slice(0, 2)}${"*".repeat(Math.min(8, text.length - 4))}${text.slice(-2)}`;
 }
 
 function requireDate(value, fieldName) {

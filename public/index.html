@@ -34,6 +34,7 @@
         <button class="tab-button" type="button" data-tab="mapping">키워드 카테고리 매칭</button>
         <button class="tab-button" type="button" data-tab="category-status">카테고리 현황</button>
         <button class="tab-button" type="button" data-tab="comparison">기간별 비교</button>
+        <button class="tab-button" type="button" data-tab="settings">환경설정</button>
       </nav>
 
       <div class="tab-view active" data-tab-view="reports">
@@ -379,6 +380,38 @@
                 <tr><td>비교할 기간을 선택해주세요.</td></tr>
               </tbody>
             </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="settings-panel tab-view" data-tab-view="settings">
+        <div class="settings-header">
+          <div>
+            <h2>네이버 Open API 계정</h2>
+            <p>API 비밀키는 Vercel 환경변수에만 보관되며 이 화면에는 노출되지 않습니다.</p>
+          </div>
+          <button id="api-settings-refresh" class="secondary-button" type="button">새로고침</button>
+        </div>
+        <div id="api-settings-summary" class="settings-summary"></div>
+        <section class="api-profile-settings">
+          <label>수집에 사용할 프로필<select id="api-active-profile"></select></label>
+          <button id="api-profile-save" type="button" disabled>활성 프로필 저장</button>
+          <p id="api-settings-status">등록된 API 프로필을 확인하는 중입니다.</p>
+        </section>
+        <div class="table-wrap settings-table-wrap">
+          <table>
+            <thead><tr><th>프로필</th><th>API 키 이름</th><th>Client ID</th><th>상태</th></tr></thead>
+            <tbody id="api-profile-body"><tr><td colspan="4">등록된 API 프로필을 확인하는 중입니다.</td></tr></tbody>
+          </table>
+        </div>
+        <section class="environment-reference">
+          <h3>Vercel 환경변수 구성</h3>
+          <div class="environment-grid">
+            <code>NAVER_CLIENT_ID_1</code><span>Client ID</span>
+            <code>NAVER_CLIENT_SECRET_1</code><span>Client Secret</span>
+            <code>NAVER_CLIENT_PROFILE_1</code><span>프로필 코드: personal 또는 corporate</span>
+            <code>NAVER_CLIENT_PROFILE_LABEL_1</code><span>표시명: 개인 계정 또는 법인 계정</span>
+            <code>NAVER_CLIENT_NAME_1</code><span>키 구분명: 개인 키 1</span>
           </div>
         </section>
       </section>

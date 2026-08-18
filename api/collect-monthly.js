@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "../src/monthlyCollector.js";
+import { getNaverCredentialPool, getNaverCredentialProfiles } from "../src/naverShoppingInsight.js";
+import { getNaverApiSettings } from "../src/storage.js";
 
 export const config = {
   maxDuration: 300
@@ -21,8 +23,11 @@ export default async function handler(request, response) {
     const range = request.method === "POST" && body.startDate && body.endDate
       ? normalizeCollectionRange({ startDate: body.startDate, endDate: body.endDate })
       : previousMonthRange();
+    const settings = await getNaverApiSettings();
+    const activeProfile = settings.activeProfile || process.env.NAVER_ACTIVE_PROFILE || getNaverCredentialProfiles()[0]?.profile || "";
     const result = await collectMonthlyNutritionKeywords({
       range,
+      credentials: getNaverCredentialPool(process.env, activeProfile),
       outputDir: process.env.VERCEL ? undefined : join(process.cwd(), "data", "monthly")
     });
 

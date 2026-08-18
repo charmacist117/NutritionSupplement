@@ -27,12 +27,17 @@
 - `NAVER_CLIENT_SECRET`: 네이버 개발자센터 Client Secret
 - `NAVER_CLIENT_ID_1`, `NAVER_CLIENT_SECRET_1`: 여러 네이버 Open API 키를 쓸 때 1번 키
 - `NAVER_CLIENT_ID_2`, `NAVER_CLIENT_SECRET_2`: 여러 네이버 Open API 키를 쓸 때 2번 키. 같은 방식으로 `_20`까지 등록 가능
+- `NAVER_CLIENT_PROFILE_1`: 키가 속한 프로필 코드. 예: `personal`, `corporate`
+- `NAVER_CLIENT_PROFILE_LABEL_1`: 설정 화면에 표시할 프로필 이름. 예: `개인 계정`
+- `NAVER_CLIENT_NAME_1`: 설정 화면에 표시할 키 이름. 예: `개인 키 1`
+- `NAVER_ACTIVE_PROFILE`: Blob에 저장된 선택값이 없을 때 사용할 기본 프로필 코드
 - `NAVER_CLIENTS_JSON`: 여러 키를 JSON 한 줄로 넣고 싶을 때 사용. 예: `[{"clientId":"...","clientSecret":"..."},{"clientId":"...","clientSecret":"..."}]`
 - `BLOB_READ_WRITE_TOKEN`: Vercel Blob 연결 시 자동 생성되는 저장소 토큰
 - `CRON_SECRET`: 수동 수집 API 보호용 선택값
 - `CHROME_EXECUTABLE_PATH`: 로컬에서 브라우저 수집기를 직접 돌릴 때만 필요
 
 네이버 API 키는 `NAVER_CLIENTS_JSON`, 번호형 변수, 기존 단일 변수 순서로 읽고 중복은 제거합니다. 한 키가 `Query limit exceeded`를 반환하면 같은 요청을 다음 키로 이어서 시도합니다.
+같은 프로필 코드를 가진 키는 하나의 계정 묶음으로 표시됩니다. 환경설정 탭에서 활성 프로필을 저장하면 다음 수집부터 해당 프로필의 키만 사용하며, Client Secret은 브라우저나 Blob에 저장하지 않습니다.
 
 ## Vercel
 
