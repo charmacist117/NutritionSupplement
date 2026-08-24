@@ -1,4 +1,5 @@
 const NAVER_OPEN_API_KEYWORDS_URL = "https://openapi.naver.com/v1/datalab/shopping/category/keywords";
+const NAVER_API_HUB_KEYWORDS_URL = "https://naverapihub.apigw.ntruss.com/shopping/v1/category/keywords";
 const NAVER_DATALAB_BASE_URL = "https://datalab.naver.com/shoppingInsight";
 const KEYWORD_REQUEST_DELAY_MS = Number(process.env.NAVER_KEYWORD_REQUEST_DELAY_MS || 350);
 const KEYWORD_RETRY_DELAYS_MS = [1500, 5000, 12000];
@@ -34,14 +35,16 @@ export function getNaverCredentialPool(env = process.env, activeProfile = undefi
     addCredential(credentials, env[`NAVER_CLIENT_ID_${index}`], env[`NAVER_CLIENT_SECRET_${index}`], {
       profile: env[`NAVER_CLIENT_PROFILE_${index}`],
       profileLabel: env[`NAVER_CLIENT_PROFILE_LABEL_${index}`],
-      name: env[`NAVER_CLIENT_NAME_${index}`]
+      name: env[`NAVER_CLIENT_NAME_${index}`],
+      provider: env[`NAVER_CLIENT_PROVIDER_${index}`]
     });
   }
 
   addCredential(credentials, env.NAVER_CLIENT_ID, env.NAVER_CLIENT_SECRET, {
     profile: env.NAVER_CLIENT_PROFILE,
     profileLabel: env.NAVER_CLIENT_PROFILE_LABEL,
-    name: env.NAVER_CLIENT_NAME
+    name: env.NAVER_CLIENT_NAME,
+    provider: env.NAVER_CLIENT_PROVIDER
   });
 
   const unique = dedupeCredentials(credentials);
@@ -61,7 +64,11 @@ export function getNaverCredentialProfiles(env = process.env) {
       label: credential.profileLabel,
       credentials: []
     };
-    current.credentials.push({ name: credential.name, clientIdHint: maskClientId(credential.clientId) });
+    current.credentials.push({
+      name: credential.name,
+      clientIdHint: maskClientId(credential.clientId),
+      provider: credential.provider
+    });
     profiles.set(credential.profile, current);
   }
   return [...profiles.values()].map((item) => ({ ...item, credentialCount: item.credentials.length }));
@@ -120,13 +127,14 @@ export async function fetchKeywordTrends(input, credentials = getNaverCredential
 
     for (let attempt = 0; attempt <= KEYWORD_RETRY_DELAYS_MS.length; attempt += 1) {
       await throttleKeywordRequest();
+      const connection = credentialConnection(credential);
 
-      const response = await fetch(NAVER_OPEN_API_KEYWORDS_URL, {
+      const response = await fetch(connection.url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Naver-Client-Id": credential.clientId,
-          "X-Naver-Client-Secret": credential.clientSecret
+          [connection.clientIdHeader]: credential.clientId,
+          [connection.clientSecretHeader]: credential.clientSecret
         },
         body: JSON.stringify(payload)
       });
@@ -136,9 +144,10 @@ export async function fetchKeywordTrends(input, credentials = getNaverCredential
 
       if (response.ok) return body;
 
-      if (isKeywordQuotaExceeded(body)) {
+      if (response.status === 429 || isKeywordQuotaExceeded(body)) {
         quotaErrors.push({
           credentialIndex: credentialIndex + 1,
+          status: response.status,
           response: body
         });
         break;
@@ -249,7 +258,8 @@ function addCredential(credentials, clientId, clientSecret, metadata = {}) {
     clientSecret: secret,
     profile,
     profileLabel: String(metadata.profileLabel || "").trim() || (profile === "default" ? "기본 계정" : profile),
-    name: String(metadata.name || "").trim() || `API 키 ${credentials.length + 1}`
+    name: String(metadata.name || "").trim() || `API 키 ${credentials.length + 1}`,
+    provider: normalizeProvider(metadata.provider)
   });
 }
 
@@ -281,6 +291,26 @@ function maskClientId(value) {
   const text = String(value || "");
   if (text.length <= 4) return "****";
   return `${text.slice(0, 2)}${"*".repeat(Math.min(8, text.length - 4))}${text.slice(-2)}`;
+}
+
+function normalizeProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  return ["api-hub", "hub", "ncp"].includes(provider) ? "api-hub" : "developers";
+}
+
+function credentialConnection(credential) {
+  if (credential.provider === "api-hub") {
+    return {
+      url: NAVER_API_HUB_KEYWORDS_URL,
+      clientIdHeader: "X-NCP-APIGW-API-KEY-ID",
+      clientSecretHeader: "X-NCP-APIGW-API-KEY"
+    };
+  }
+  return {
+    url: NAVER_OPEN_API_KEYWORDS_URL,
+    clientIdHeader: "X-Naver-Client-Id",
+    clientSecretHeader: "X-Naver-Client-Secret"
+  };
 }
 
 function requireDate(value, fieldName) {

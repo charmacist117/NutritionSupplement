@@ -372,12 +372,13 @@ async function loadApiSettings() {
         row.innerHTML = `
           <td>${index === 0 ? escapeHtml(profile.label) : ""}</td>
           <td>${escapeHtml(credential.name)}</td>
+          <td>${credential.provider === "api-hub" ? "NAVER API HUB" : "개발자센터"}</td>
           <td><code>${escapeHtml(credential.clientIdHint)}</code></td>
           <td>${profile.profile === data.activeProfile ? '<span class="status-badge active">사용 중</span>' : '<span class="status-badge">대기</span>'}</td>`;
         apiProfileBody.append(row);
       }
     }
-    if (!profiles.length) apiProfileBody.innerHTML = '<tr><td colspan="4">Vercel에 등록된 네이버 API 키가 없습니다.</td></tr>';
+    if (!profiles.length) apiProfileBody.innerHTML = '<tr><td colspan="5">Vercel에 등록된 네이버 API 키가 없습니다.</td></tr>';
     apiActiveProfile.disabled = !profiles.length;
     apiProfileSaveButton.disabled = !profiles.length;
     apiSettingsStatus.textContent = profiles.length
