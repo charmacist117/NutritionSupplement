@@ -46,7 +46,7 @@ const categoryKeywordSearch = document.querySelector("#category-keyword-search")
 const categoryKeywordBody = document.querySelector("#category-keyword-body");
 const comparisonSelectAllButton = document.querySelector("#comparison-select-all");
 const comparisonClearButton = document.querySelector("#comparison-clear");
-const comparisonEmailCopyButton = document.querySelector("#comparison-email-copy");
+const comparisonPdfDownloadButton = document.querySelector("#comparison-pdf-download");
 const comparisonDownloadButton = document.querySelector("#comparison-download");
 const executivePdfDownloadButton = document.querySelector("#executive-pdf-download");
 const executiveBaselinePeriods = document.querySelector("#executive-baseline-periods");
@@ -256,7 +256,7 @@ comparisonKeywordFilter.addEventListener("change", () => renderComparisonKeyword
 
 comparisonDownloadButton.addEventListener("click", () => downloadComparisonXlsx());
 executivePdfDownloadButton.addEventListener("click", () => downloadExecutivePdf());
-comparisonEmailCopyButton.addEventListener("click", () => copyComparisonEmail());
+comparisonPdfDownloadButton.addEventListener("click", () => downloadComparisonPdf());
 apiSettingsRefreshButton.addEventListener("click", () => loadApiSettings());
 apiActiveProfile.addEventListener("change", () => {
   apiProfileSaveButton.disabled = !apiActiveProfile.value;
@@ -1805,7 +1805,7 @@ async function renderComparisonSheet(options = {}) {
   const minimumSelection = modeConfig.monthCount * 2;
   comparisonStatus.textContent = `${reportKeys.length}개 저장 자료 중 ${selectedKeys.length}개 선택 · ${modeConfig.label} 비교`;
   comparisonDownloadButton.disabled = true;
-  comparisonEmailCopyButton.disabled = true;
+  comparisonPdfDownloadButton.disabled = true;
 
   if (selectedKeys.length < minimumSelection) {
     const message = comparisonMode === "month"
@@ -1849,7 +1849,7 @@ async function renderComparisonSheet(options = {}) {
   comparisonRangeLabel.textContent = `키워드 ${periodLabel(previous)} 대비 ${periodLabel(latest)} · 제품군 증감 ${periodLabel(first)} 대비 ${periodLabel(latest)} · ${comparisonMethodText(comparisonMode)}`;
   comparisonStatus.textContent = `${selectedKeys.length}개 저장 자료로 ${reports.length}개 ${modeConfig.label} 기간 비교 중 · ${grouped.note}`;
   comparisonDownloadButton.disabled = false;
-  comparisonEmailCopyButton.disabled = false;
+  comparisonPdfDownloadButton.disabled = false;
 }
 
 function readComparisonMode() {
@@ -2223,7 +2223,7 @@ function clearComparisonView(message) {
   comparisonKeywordBody.innerHTML = `<tr><td>${escapeHtml(message)}</td></tr>`;
   comparisonKeywordStatus.textContent = message;
   comparisonDownloadButton.disabled = true;
-  comparisonEmailCopyButton.disabled = true;
+  comparisonPdfDownloadButton.disabled = true;
 }
 
 function buildComparisonCategoryRows(reports, keywordRows) {
@@ -2645,23 +2645,41 @@ function downloadComparisonXlsx() {
   URL.revokeObjectURL(url);
 }
 
-async function copyComparisonEmail() {
+async function downloadComparisonPdf() {
   if (comparisonReports.length < 2) return;
 
-  comparisonEmailCopyButton.disabled = true;
-  const originalText = comparisonEmailCopyButton.textContent;
+  comparisonPdfDownloadButton.disabled = true;
+  const originalText = comparisonPdfDownloadButton.textContent;
+  comparisonPdfDownloadButton.textContent = "PDF 작성 중";
   try {
     const content = buildComparisonEmailContent();
-    await writeRichClipboard(content.html, content.text);
-    comparisonEmailCopyButton.textContent = "복사 완료";
-    comparisonStatus.textContent = "메일 본문을 서식과 함께 복사했습니다. Outlook의 새 메일 본문에 붙여넣으세요.";
+    const response = await fetch("/api/comparison-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html: content.html })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || "비교 PDF 생성에 실패했습니다.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `comparison_${comparisonMode}_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    comparisonPdfDownloadButton.textContent = "다운로드 완료";
+    comparisonStatus.textContent = "선택한 기간의 비교 내용을 PDF로 생성했습니다.";
   } catch (error) {
-    comparisonEmailCopyButton.textContent = "복사 실패";
-    comparisonStatus.textContent = error.message || "메일 본문을 복사하지 못했습니다.";
+    comparisonPdfDownloadButton.textContent = "생성 실패";
+    comparisonStatus.textContent = error.message || "비교 PDF를 생성하지 못했습니다.";
   } finally {
     window.setTimeout(() => {
-      comparisonEmailCopyButton.textContent = originalText;
-      comparisonEmailCopyButton.disabled = comparisonReports.length < 2;
+      comparisonPdfDownloadButton.textContent = originalText;
+      comparisonPdfDownloadButton.disabled = comparisonReports.length < 2;
     }, 1800);
   }
 }
@@ -2829,38 +2847,6 @@ function emailTableHtml(headers, rows, emptyMessage = "표시할 자료가 없�
 
 function tabSeparatedText(headers, rows) {
   return [headers, ...rows].map((row) => row.map((cell) => String(cell ?? "").replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
-}
-
-async function writeRichClipboard(html, plainText) {
-  if (navigator.clipboard?.write && window.ClipboardItem) {
-    const item = new ClipboardItem({
-      "text/html": new Blob([html], { type: "text/html" }),
-      "text/plain": new Blob([plainText], { type: "text/plain" })
-    });
-    await navigator.clipboard.write([item]);
-    return;
-  }
-
-  const container = document.createElement("div");
-  container.contentEditable = "true";
-  container.style.position = "fixed";
-  container.style.left = "-10000px";
-  container.innerHTML = html;
-  document.body.append(container);
-
-  const selection = window.getSelection();
-  let copied = false;
-  try {
-    const range = document.createRange();
-    range.selectNodeContents(container);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    copied = document.execCommand("copy");
-  } finally {
-    selection.removeAllRanges();
-    container.remove();
-  }
-  if (!copied) throw new Error("브라우저가 서식 복사를 허용하지 않았습니다.");
 }
 
 function periodAxisLabelParts(value) {

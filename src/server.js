@@ -7,7 +7,7 @@ import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMont
 import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, getNaverCredentialProfiles, NaverShoppingInsightError } from "./naverShoppingInsight.js";
 import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
-import { createExecutiveReportPdf } from "./executiveReport.js";
+import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -87,6 +87,17 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, {
         "Content-Type": "application/pdf",
         "Content-Disposition": 'attachment; filename="health-market-report.pdf"',
+        "Content-Length": pdf.length
+      });
+      return response.end(pdf);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/comparison-report") {
+      const body = await readJson(request);
+      const pdf = await createComparisonReportPdf(body);
+      response.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="shopping-insight-comparison.pdf"',
         "Content-Length": pdf.length
       });
       return response.end(pdf);

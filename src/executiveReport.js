@@ -34,6 +34,42 @@ export async function createExecutiveReportPdf(input = {}) {
   }
 }
 
+export async function createComparisonReportPdf(input = {}) {
+  const html = String(input.html || "");
+  if (!html.trim()) throw new Error("PDF로 만들 기간별 비교 내용이 없습니다.");
+  if (Buffer.byteLength(html, "utf8") > 2_000_000) throw new Error("기간별 비교 내용이 PDF 생성 한도를 초과했습니다.");
+  if (/<\/?(?:script|iframe|object|embed|link|meta)\b/i.test(html)) throw new Error("허용되지 않는 보고서 내용이 포함되어 있습니다.");
+
+  const browser = await launchPdfBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(renderComparisonHtml(html), { waitUntil: "networkidle0" });
+    await page.evaluate(async () => document.fonts.ready);
+    return await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "12mm", right: "11mm", bottom: "14mm", left: "11mm" },
+      displayHeaderFooter: true,
+      headerTemplate: "<span></span>",
+      footerTemplate: '<div style="width:100%;padding:0 11mm;color:#7b8492;font-size:8px;text-align:right"><span class="pageNumber"></span> / <span class="totalPages"></span></div>'
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+function renderComparisonHtml(content) {
+  const fontFace = IS_SERVERLESS
+    ? ""
+    : `@font-face{font-family:"Noto Sans KR";font-style:normal;font-weight:100 900;src:url(data:font/ttf;base64,${KOREAN_FONT_DATA}) format("truetype")}`;
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+    ${fontFace}
+    *{box-sizing:border-box}html,body{margin:0;padding:0;color:#17202a;font-family:"Noto Sans KR",Arial,sans-serif}
+    body{font-size:10px}h1{font-size:22px}h2{font-size:15px;break-after:avoid}table{break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid;break-after:auto}
+    td,th{overflow-wrap:anywhere}div{max-width:none!important}
+  </style></head><body>${content}</body></html>`;
+}
+
 function aggregatePeriod(reports = [], fallbackLabel) {
   const sorted = reports.filter(Boolean).slice(0, 24).sort((a, b) => String(a.endDate).localeCompare(String(b.endDate)));
   if (!sorted.length) return { label: fallbackLabel, startDate: "", endDate: "", rows: [] };
