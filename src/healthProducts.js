@@ -62,6 +62,15 @@ export function buildHealthProductSearchRows(details) {
   return (details || []).map((item) => ({ id: item.id, ingredients: ingredientText(item.tables) })).filter((item) => item.id);
 }
 
+export function mergeHealthProductSearchRows(items, detailRows) {
+  const byId = new Map((items || []).map((item) => [item.id, { id: item.id, ingredients: item.type || "" }]));
+  for (const row of detailRows || []) {
+    const current = byId.get(row.id);
+    byId.set(row.id, { id: row.id, ingredients: [current?.ingredients, row.ingredients].filter(Boolean).join(" | ") });
+  }
+  return [...byId.values()];
+}
+
 export function filterHealthProductSearchRows(rows, query) {
   const expression = parseBooleanQuery(query);
   if (!expression) return new Set((rows || []).map((item) => item.id));
@@ -252,5 +261,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes(
   assert.deepEqual([...filterHealthProductSearchRows(searchRows, '비타민 AND NOT 마그네슘')], ["1"]);
   assert.deepEqual([...filterHealthProductSearchRows(searchRows, '"비타민 C"')], ["1"]);
   assert.throws(() => filterHealthProductSearchRows(searchRows, "비타민 AND"), /검색식/);
+  assert.deepEqual([...filterHealthProductSearchRows(mergeHealthProductSearchRows([{ id: "3", type: "EPA 및 DHA 함유 유지" }], []), "EPA")], ["3"]);
   console.log("health product parser ok");
 }

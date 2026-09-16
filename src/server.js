@@ -9,7 +9,7 @@ import { deleteMonthlyReport, getHealthFunctionalIngredients, getHealthProductDe
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
-import { buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts } from "./healthProducts.js";
+import { buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, mergeHealthProductSearchRows, pageHealthProducts } from "./healthProducts.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -121,7 +121,8 @@ const server = createServer(async (request, response) => {
         let matchedIds = null;
         if (query) {
           const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
-          searchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number, options)))).flat();
+          const detailSearchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number, options)))).flat();
+          searchRows = mergeHealthProductSearchRows(index.items, detailSearchRows);
           matchedIds = filterHealthProductSearchRows(searchRows, query);
         }
         const params = { page: url.searchParams.get("page"), matchedIds };
@@ -152,7 +153,7 @@ const server = createServer(async (request, response) => {
           await saveHealthProductsIndex(index, options);
         } else if (detailTotal < index.total) {
           const start = Number(index.nextDetailIndex || 0);
-          const fetched = await fetchHealthProductDetails(index.items.slice(start, start + 60));
+          const fetched = await fetchHealthProductDetails(index.items.slice(start, start + 30));
           const grouped = new Map();
           fetched.forEach((item, offset) => {
             const number = Math.floor((start + offset) / HEALTH_PRODUCT_CHUNK_SIZE);

@@ -600,11 +600,14 @@ async function loadProducts(page = 1) {
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
         <td><span class="status-badge ${item.detail ? "active" : ""}">${item.detail ? "저장" : "대기"}</span></td>
-        <td><strong>${escapeHtml(item.name)}</strong></td><td class="product-ingredients">${escapeHtml(item.detail?.ingredientText || "-")}</td><td>${escapeHtml(item.company)}</td>
+        <td><strong>${escapeHtml(item.name)}</strong></td><td class="product-ingredients">${escapeHtml(item.detail?.ingredientText || item.type || "-")}</td><td>${escapeHtml(item.company)}</td>
         <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td>${item.detail ? `<button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button>` : "-"}</td>
       </tr>`).join("") : '<tr><td colspan="9">검색 결과가 없습니다.</td></tr>';
-    productsStatus.textContent = `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · 상세/검색색인 ${data.detailTotal.toLocaleString("ko-KR")} / ${data.searchIndexedThrough.toLocaleString("ko-KR")}건${data.complete ? " · 수집 완료" : ""}`;
+    const coverage = data.indexedTotal ? (data.detailTotal / data.indexedTotal * 100).toFixed(1) : "0.0";
+    productsStatus.textContent = data.complete
+      ? `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 상세 원료 수집 완료`
+      : `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 중 상세 원료 ${data.detailTotal.toLocaleString("ko-KR")}건 (${coverage}%) 수집 · 미수집 제품은 품목유형 기준 결과입니다.`;
     productsProgress.value = data.indexedTotal ? data.detailTotal / data.indexedTotal * 100 : 0;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
@@ -620,11 +623,13 @@ async function loadProducts(page = 1) {
 async function syncProducts() {
   productsSyncing = true;
   productsSyncButton.textContent = "수집 중지";
+  let failures = 0;
   while (productsSyncing) {
     try {
       const response = await fetch("/api/health-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "제품 자료를 수집하지 못했습니다.");
+      failures = 0;
       productsProgress.value = data.progress;
       productsStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건 (${data.progress}%) · 검색색인 ${data.searchProgress}%`;
       productsLoaded = false;
@@ -634,7 +639,13 @@ async function syncProducts() {
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {
-      productsStatus.textContent = error.message;
+      failures += 1;
+      if (productsSyncing && failures <= 3) {
+        productsStatus.textContent = `${error.message} · 잠시 후 재시도합니다 (${failures}/3).`;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+      productsStatus.textContent = `${error.message} · 전체 수집을 다시 누르면 저장된 다음 위치부터 이어집니다.`;
       break;
     }
   }

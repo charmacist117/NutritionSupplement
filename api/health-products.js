@@ -2,11 +2,11 @@ import {
   getHealthProductDetailChunk, getHealthProductSearchChunk, getHealthProductsIndex, saveHealthProductDetailChunk, saveHealthProductSearchChunk, saveHealthProductsIndex
 } from "../src/storage.js";
 import {
-  buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts
+  buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, mergeHealthProductSearchRows, pageHealthProducts
 } from "../src/healthProducts.js";
 
 export const config = { maxDuration: 60 };
-const BATCH_SIZE = 60;
+const BATCH_SIZE = 30;
 
 export default async function handler(request, response) {
   try {
@@ -18,7 +18,8 @@ export default async function handler(request, response) {
       let matchedIds = null;
       if (query) {
         const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
-        searchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number)))).flat();
+        const detailSearchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number)))).flat();
+        searchRows = mergeHealthProductSearchRows(index.items, detailSearchRows);
         matchedIds = filterHealthProductSearchRows(searchRows, query);
       }
       const params = { page: request.query.page, matchedIds };
