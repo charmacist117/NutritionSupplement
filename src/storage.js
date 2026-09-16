@@ -287,6 +287,34 @@ export async function saveHealthProductDetailChunk(number, items, options = {}) 
   return { saved: true, storage: "file" };
 }
 
+export async function getHealthProductSearchChunk(number, options = {}) {
+  const name = `search-${String(number).padStart(4, "0")}.json`;
+  if (shouldUseBlob()) {
+    const text = await getBlobText(`${HEALTH_PRODUCTS_PREFIX}/${name}`);
+    return text ? JSON.parse(text) : [];
+  }
+  try {
+    const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
+    return JSON.parse(await readFile(join(outputDir, name), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveHealthProductSearchChunk(number, items, options = {}) {
+  const name = `search-${String(number).padStart(4, "0")}.json`;
+  if (shouldUseBlob()) {
+    const { put } = await import("@vercel/blob");
+    await put(`${HEALTH_PRODUCTS_PREFIX}/${name}`, JSON.stringify(items), { access: BLOB_ACCESS, allowOverwrite: true, contentType: "application/json" });
+    return { saved: true, storage: "blob" };
+  }
+  if (process.env.VERCEL) return { saved: false, storage: "none", reason: "Blob credentials are not configured." };
+  const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, name), `${JSON.stringify(items)}\n`, "utf8");
+  return { saved: true, storage: "file" };
+}
+
 function shouldUseBlob() {
   return hasBlobCredentials();
 }

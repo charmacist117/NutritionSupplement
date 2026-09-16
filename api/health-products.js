@@ -1,8 +1,8 @@
 import {
-  getHealthProductDetailChunk, getHealthProductsIndex, saveHealthProductDetailChunk, saveHealthProductsIndex
+  getHealthProductDetailChunk, getHealthProductSearchChunk, getHealthProductsIndex, saveHealthProductDetailChunk, saveHealthProductSearchChunk, saveHealthProductsIndex
 } from "../src/storage.js";
 import {
-  fetchHealthProductDetails, fetchHealthProductIndex, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts
+  buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts
 } from "../src/healthProducts.js";
 
 export const config = { maxDuration: 60 };
@@ -13,10 +13,20 @@ export default async function handler(request, response) {
     if (request.method === "GET") {
       const index = await getHealthProductsIndex();
       if (!index) return response.status(404).json({ error: "저장된 건강기능식품 제품 자료가 없습니다. 전체 수집을 시작해주세요." });
-      const params = { page: request.query.page, includes: request.query.includes, excludes: request.query.excludes };
+      const query = String(request.query.q || "").trim();
+      let searchRows = [];
+      let matchedIds = null;
+      if (query) {
+        const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
+        searchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number)))).flat();
+        matchedIds = filterHealthProductSearchRows(searchRows, query);
+      }
+      const params = { page: request.query.page, matchedIds };
       const first = pageHealthProducts(index, [], params);
       const chunkNumbers = [...new Set(first.items.filter((item) => item.index < index.detailTotal).map((item) => Math.floor(item.index / HEALTH_PRODUCT_CHUNK_SIZE)))];
-      const details = (await Promise.all(chunkNumbers.map((number) => getHealthProductDetailChunk(number)))).flat();
+      const ingredientMap = new Map(searchRows.map((item) => [item.id, item.ingredients]));
+      const details = (await Promise.all(chunkNumbers.map((number) => getHealthProductDetailChunk(number)))).flat()
+        .map((item) => ({ ...item, ingredientText: item.ingredientText || ingredientMap.get(item.id) || buildHealthProductSearchRows([item])[0]?.ingredients || "" }));
       return response.status(200).json(pageHealthProducts(index, details, params));
     }
 
@@ -28,7 +38,18 @@ export default async function handler(request, response) {
         if (!storage.saved) return response.status(503).json({ error: "Blob 저장소가 연결되어야 제품 자료를 저장할 수 있습니다.", storage });
         return response.status(200).json(status(index));
       }
-      if (index.complete) return response.status(200).json(status(index));
+      const indexedThrough = Number(index.searchIndexedThrough || 0);
+      const detailTotal = Number(index.detailTotal || 0);
+      if (indexedThrough < detailTotal) {
+        const number = Math.floor(indexedThrough / HEALTH_PRODUCT_CHUNK_SIZE);
+        const details = await getHealthProductDetailChunk(number);
+        await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(details));
+        index.searchIndexedThrough = Math.min(detailTotal, (number + 1) * HEALTH_PRODUCT_CHUNK_SIZE);
+        index.updatedAt = new Date().toISOString();
+        await saveHealthProductsIndex(index);
+        return response.status(200).json(status(index));
+      }
+      if (detailTotal >= index.total) return response.status(200).json(status(index));
 
       const start = Number(index.nextDetailIndex || 0);
       const sourceItems = index.items.slice(start, start + BATCH_SIZE);
@@ -43,12 +64,15 @@ export default async function handler(request, response) {
         const current = await getHealthProductDetailChunk(number);
         const byId = new Map(current.map((item) => [item.id, item]));
         items.forEach((item) => byId.set(item.id, item));
-        const storage = await saveHealthProductDetailChunk(number, [...byId.values()]);
+        const merged = [...byId.values()];
+        const storage = await saveHealthProductDetailChunk(number, merged);
         if (!storage.saved) return response.status(503).json({ error: "Blob 저장소가 연결되어야 상세 자료를 저장할 수 있습니다.", storage });
+        await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(merged));
       }
 
       index.nextDetailIndex = start + fetched.length;
       index.detailTotal = index.nextDetailIndex;
+      index.searchIndexedThrough = index.detailTotal;
       index.complete = index.detailTotal >= index.total;
       index.updatedAt = new Date().toISOString();
       await saveHealthProductsIndex(index);
@@ -57,14 +81,19 @@ export default async function handler(request, response) {
 
     return response.status(405).json({ error: "Method not allowed" });
   } catch (error) {
-    return response.status(502).json({ error: error.message || "건강기능식품 제품 자료를 수집하지 못했습니다." });
+    return response.status(error.status || 502).json({ error: error.message || "건강기능식품 제품 자료를 수집하지 못했습니다." });
   }
 }
 
 function status(index) {
+  const detailTotal = Number(index.detailTotal || 0);
+  const searchIndexedThrough = Number(index.searchIndexedThrough || 0);
+  const detailComplete = detailTotal >= Number(index.total || 0);
   return {
-    total: index.total || 0, detailTotal: index.detailTotal || 0, complete: Boolean(index.complete),
-    progress: index.total ? Math.floor((index.detailTotal || 0) / index.total * 1000) / 10 : 0,
+    total: index.total || 0, detailTotal, searchIndexedThrough, detailComplete,
+    complete: detailComplete && searchIndexedThrough >= detailTotal,
+    progress: index.total ? Math.floor(Math.min(detailTotal, searchIndexedThrough) / index.total * 1000) / 10 : 0,
+    searchProgress: detailTotal ? Math.floor(searchIndexedThrough / detailTotal * 1000) / 10 : 100,
     syncedAt: index.syncedAt || null, updatedAt: index.updatedAt || null
   };
 }

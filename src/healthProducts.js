@@ -20,7 +20,7 @@ export async function fetchHealthProductIndex() {
   const items = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ko")).map((item, index) => ({ ...item, index }));
   return {
     syncedAt: new Date().toISOString(), sourceUrl: HEALTH_PRODUCTS_SOURCE_URL,
-    total: items.length, detailTotal: 0, nextDetailIndex: 0, complete: !items.length, items
+    total: items.length, detailTotal: 0, nextDetailIndex: 0, searchIndexedThrough: 0, complete: !items.length, items
   };
 }
 
@@ -42,13 +42,8 @@ export async function fetchHealthProductDetails(items, { concurrency = 10 } = {}
   return results;
 }
 
-export function pageHealthProducts(index, details, { page = 1, includes = "", excludes = "" } = {}) {
-  const includeTerms = terms(includes);
-  const excludeTerms = terms(excludes);
-  const filtered = (index?.items || []).filter((item) => {
-    const text = searchKey([item.name, item.company, item.type, item.reportNumber].join(" "));
-    return includeTerms.every((term) => text.includes(term)) && !excludeTerms.some((term) => text.includes(term));
-  });
+export function pageHealthProducts(index, details, { page = 1, matchedIds = null } = {}) {
+  const filtered = matchedIds ? (index?.items || []).filter((item) => matchedIds.has(item.id)) : (index?.items || []);
   const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PRODUCT_PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const start = (currentPage - 1) * HEALTH_PRODUCT_PAGE_SIZE;
@@ -57,8 +52,20 @@ export function pageHealthProducts(index, details, { page = 1, includes = "", ex
     page: currentPage, pageSize: HEALTH_PRODUCT_PAGE_SIZE, total: filtered.length, totalPages,
     items: filtered.slice(start, start + HEALTH_PRODUCT_PAGE_SIZE).map((item) => ({ ...item, detail: detailMap.get(item.id) || null })),
     indexedTotal: index?.total || 0, detailTotal: index?.detailTotal || 0,
-    complete: Boolean(index?.complete), syncedAt: index?.syncedAt || null, sourceUrl: index?.sourceUrl || HEALTH_PRODUCTS_SOURCE_URL
+    searchIndexedThrough: index?.searchIndexedThrough || 0,
+    complete: Boolean(index?.complete) && Number(index?.searchIndexedThrough || 0) >= Number(index?.detailTotal || 0),
+    syncedAt: index?.syncedAt || null, sourceUrl: index?.sourceUrl || HEALTH_PRODUCTS_SOURCE_URL
   };
+}
+
+export function buildHealthProductSearchRows(details) {
+  return (details || []).map((item) => ({ id: item.id, ingredients: ingredientText(item.tables) })).filter((item) => item.id);
+}
+
+export function filterHealthProductSearchRows(rows, query) {
+  const expression = parseBooleanQuery(query);
+  if (!expression) return new Set((rows || []).map((item) => item.id));
+  return new Set((rows || []).filter((item) => evaluate(expression, searchKey(item.ingredients))).map((item) => item.id));
 }
 
 export function parseDetailTables(html) {
@@ -132,7 +139,7 @@ async function fetchProductDetail(session, item) {
   if (!response.ok) throw new Error(`상세정보 응답 오류 (${response.status})`);
   const tables = parseDetailTables(await response.text());
   if (!tables.length) throw new Error("상세 표를 찾지 못했습니다.");
-  return { fetchedAt: new Date().toISOString(), sourceUrl: url, tables, ...detailFields(tables) };
+  return { fetchedAt: new Date().toISOString(), sourceUrl: url, tables, ingredientText: ingredientText(tables), ...detailFields(tables) };
 }
 
 function normalizeListItem(row) {
@@ -154,8 +161,73 @@ function findArray(value) {
   return null;
 }
 
-function terms(value) {
-  return String(value || "").split(/[\s,]+/).map(searchKey).filter(Boolean);
+function ingredientText(tables) {
+  const values = [];
+  for (const table of tables || []) {
+    const headerIndex = table.rows.findIndex((row) => row.some((cell) => /성분\s*및\s*원료|원재료명/.test(cell)));
+    if (headerIndex < 0) continue;
+    const column = table.rows[headerIndex].findIndex((cell) => /성분\s*및\s*원료|원재료명/.test(cell));
+    for (const row of table.rows.slice(headerIndex + 1)) {
+      if (row[column]) values.push(row[column]);
+    }
+  }
+  return values.join(" | ");
+}
+
+function parseBooleanQuery(query) {
+  const source = String(query || "").trim();
+  if (!source) return null;
+  const raw = [...source.matchAll(/"([^"]+)"|'([^']+)'|\(|\)|\bAND\b|\bOR\b|\bNOT\b|[^\s()]+/gi)].map((match) => {
+    const value = match[1] || match[2] || match[0];
+    const upper = value.toUpperCase();
+    return ["AND", "OR", "NOT"].includes(upper) ? { type: upper } : value === "(" ? { type: "(" } : value === ")" ? { type: ")" } : { type: "TERM", value: searchKey(value) };
+  });
+  const tokens = [];
+  for (const token of raw) {
+    const previous = tokens.at(-1);
+    if (previous && ["TERM", ")"].includes(previous.type) && ["TERM", "(", "NOT"].includes(token.type)) tokens.push({ type: "AND" });
+    tokens.push(token);
+  }
+  let position = 0;
+  const parseOr = () => {
+    let node = parseAnd();
+    while (tokens[position]?.type === "OR") { position++; node = { type: "OR", left: node, right: parseAnd() }; }
+    return node;
+  };
+  const parseAnd = () => {
+    let node = parseNot();
+    while (tokens[position]?.type === "AND") { position++; node = { type: "AND", left: node, right: parseNot() }; }
+    return node;
+  };
+  const parseNot = () => tokens[position]?.type === "NOT" ? (position++, { type: "NOT", value: parseNot() }) : parsePrimary();
+  const parsePrimary = () => {
+    const token = tokens[position++];
+    if (!token) throw queryError();
+    if (token.type === "TERM") return token;
+    if (token.type === "(") {
+      const node = parseOr();
+      if (tokens[position++]?.type !== ")") throw queryError();
+      return node;
+    }
+    throw queryError();
+  };
+  const result = parseOr();
+  if (position !== tokens.length) throw queryError();
+  return result;
+}
+
+function evaluate(node, text) {
+  if (node.type === "TERM") return text.includes(node.value);
+  if (node.type === "NOT") return !evaluate(node.value, text);
+  if (node.type === "AND") return evaluate(node.left, text) && evaluate(node.right, text);
+  return evaluate(node.left, text) || evaluate(node.right, text);
+}
+
+function queryError() {
+  const error = new Error("검색식이 올바르지 않습니다. AND, OR, NOT과 괄호의 위치를 확인해주세요.");
+  error.code = "INVALID_QUERY";
+  error.status = 400;
+  return error;
 }
 
 function searchKey(value) {
@@ -174,7 +246,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes(
   const tables = parseDetailTables('<table><tr><th>제품명</th><td>테스트</td><th>소비기한</th><td>24개월</td></tr></table><table><tr><th>번호</th><th>성분 및 원료</th></tr><tr><td>1</td><td>비타민 C</td></tr></table>');
   assert.equal(tables.length, 2);
   assert.equal(tables[1].rows[1][1], "비타민 C");
-  const page = pageHealthProducts({ items: [{ id: "1", name: "오메가3", company: "회사", type: "유지" }], total: 1 }, [], { includes: "오메가", excludes: "마그네슘" });
-  assert.equal(page.total, 1);
+  const searchRows = buildHealthProductSearchRows([{ id: "1", tables }, { id: "2", tables: [{ rows: [["성분 및 원료"], ["마그네슘"]] }] }]);
+  assert.equal(searchRows[0].ingredients, "비타민 C");
+  assert.deepEqual([...filterHealthProductSearchRows(searchRows, '(비타민 AND C) OR 마그네슘')], ["1", "2"]);
+  assert.deepEqual([...filterHealthProductSearchRows(searchRows, '비타민 AND NOT 마그네슘')], ["1"]);
+  assert.deepEqual([...filterHealthProductSearchRows(searchRows, '"비타민 C"')], ["1"]);
+  assert.throws(() => filterHealthProductSearchRows(searchRows, "비타민 AND"), /검색식/);
   console.log("health product parser ok");
 }

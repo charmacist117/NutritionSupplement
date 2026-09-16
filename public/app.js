@@ -77,8 +77,7 @@ const ingredientsPrevButton = document.querySelector("#ingredients-prev");
 const ingredientsNextButton = document.querySelector("#ingredients-next");
 const ingredientsPage = document.querySelector("#ingredients-page");
 const productsSearchForm = document.querySelector("#products-search-form");
-const productsIncludes = document.querySelector("#products-includes");
-const productsExcludes = document.querySelector("#products-excludes");
+const productsQuery = document.querySelector("#products-query");
 const productsSyncButton = document.querySelector("#products-sync");
 const productsStatus = document.querySelector("#products-status");
 const productsProgress = document.querySelector("#products-progress");
@@ -590,7 +589,7 @@ async function loadProducts(page = 1) {
   productsStatus.textContent = "저장된 건강기능식품 제품 자료를 불러오는 중입니다.";
   productsPrevButton.disabled = true;
   productsNextButton.disabled = true;
-  const params = new URLSearchParams({ page: String(Math.max(1, page)), includes: productsIncludes.value.trim(), excludes: productsExcludes.value.trim() });
+  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim() });
   try {
     const response = await fetch(`/api/health-products?${params}`);
     const data = await response.json();
@@ -601,18 +600,18 @@ async function loadProducts(page = 1) {
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
         <td><span class="status-badge ${item.detail ? "active" : ""}">${item.detail ? "저장" : "대기"}</span></td>
-        <td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.company)}</td>
+        <td><strong>${escapeHtml(item.name)}</strong></td><td class="product-ingredients">${escapeHtml(item.detail?.ingredientText || "-")}</td><td>${escapeHtml(item.company)}</td>
         <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td>${item.detail ? `<button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button>` : "-"}</td>
-      </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
-    productsStatus.textContent = `검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건${data.complete ? " · 수집 완료" : ""}`;
+      </tr>`).join("") : '<tr><td colspan="9">검색 결과가 없습니다.</td></tr>';
+    productsStatus.textContent = `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · 상세/검색색인 ${data.detailTotal.toLocaleString("ko-KR")} / ${data.searchIndexedThrough.toLocaleString("ko-KR")}건${data.complete ? " · 수집 완료" : ""}`;
     productsProgress.value = data.indexedTotal ? data.detailTotal / data.indexedTotal * 100 : 0;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
   } catch (error) {
     productsLoaded = true;
-    productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
+    productsBody.innerHTML = `<tr><td colspan="9">${escapeHtml(error.message)}</td></tr>`;
     productsStatus.textContent = error.message;
     productsPage.textContent = "1 / 1";
   }
@@ -627,7 +626,7 @@ async function syncProducts() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "제품 자료를 수집하지 못했습니다.");
       productsProgress.value = data.progress;
-      productsStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건 · ${data.progress}%`;
+      productsStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건 (${data.progress}%) · 검색색인 ${data.searchProgress}%`;
       productsLoaded = false;
       if (data.complete) {
         productsStatus.textContent += " · 수집 완료";

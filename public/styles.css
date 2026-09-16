@@ -227,9 +227,27 @@ button:disabled {
 
 .product-search-controls {
   display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr)) auto;
+  grid-template-columns: minmax(320px, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.product-query-help {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.product-query-help code {
+  color: var(--ink);
+}
+
+.product-ingredients {
+  min-width: 260px;
+  max-width: 420px;
+  white-space: normal;
+  line-height: 1.45;
 }
 
 .product-search-controls label {

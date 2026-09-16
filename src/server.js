@@ -5,11 +5,11 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, getNaverCredentialProfiles, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { deleteMonthlyReport, getHealthFunctionalIngredients, getHealthProductDetailChunk, getHealthProductsIndex, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveHealthFunctionalIngredients, saveHealthProductDetailChunk, saveHealthProductsIndex, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
+import { deleteMonthlyReport, getHealthFunctionalIngredients, getHealthProductDetailChunk, getHealthProductSearchChunk, getHealthProductsIndex, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveHealthFunctionalIngredients, saveHealthProductDetailChunk, saveHealthProductSearchChunk, saveHealthProductsIndex, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
-import { fetchHealthProductDetails, fetchHealthProductIndex, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts } from "./healthProducts.js";
+import { buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, pageHealthProducts } from "./healthProducts.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -116,10 +116,20 @@ const server = createServer(async (request, response) => {
       if (request.method === "GET") {
         const index = await getHealthProductsIndex(options);
         if (!index) return sendJson(response, 404, { error: "저장된 건강기능식품 제품 자료가 없습니다. 전체 수집을 시작해주세요." });
-        const params = { page: url.searchParams.get("page"), includes: url.searchParams.get("includes"), excludes: url.searchParams.get("excludes") };
+        const query = String(url.searchParams.get("q") || "").trim();
+        let searchRows = [];
+        let matchedIds = null;
+        if (query) {
+          const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
+          searchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number, options)))).flat();
+          matchedIds = filterHealthProductSearchRows(searchRows, query);
+        }
+        const params = { page: url.searchParams.get("page"), matchedIds };
         const first = pageHealthProducts(index, [], params);
         const chunks = [...new Set(first.items.filter((item) => item.index < index.detailTotal).map((item) => Math.floor(item.index / HEALTH_PRODUCT_CHUNK_SIZE)))];
-        const details = (await Promise.all(chunks.map((number) => getHealthProductDetailChunk(number, options)))).flat();
+        const ingredientMap = new Map(searchRows.map((item) => [item.id, item.ingredients]));
+        const details = (await Promise.all(chunks.map((number) => getHealthProductDetailChunk(number, options)))).flat()
+          .map((item) => ({ ...item, ingredientText: item.ingredientText || ingredientMap.get(item.id) || buildHealthProductSearchRows([item])[0]?.ingredients || "" }));
         return sendJson(response, 200, pageHealthProducts(index, details, params));
       }
       if (request.method === "POST") {
@@ -129,9 +139,18 @@ const server = createServer(async (request, response) => {
           index = await fetchHealthProductIndex();
           const storage = await saveHealthProductsIndex(index, options);
           if (!storage.saved) return sendJson(response, 503, { error: "Blob 저장소가 연결되어야 제품 자료를 저장할 수 있습니다.", storage });
-          return sendJson(response, 200, { total: index.total, detailTotal: 0, complete: index.complete, progress: 0, syncedAt: index.syncedAt, updatedAt: null });
+          return sendJson(response, 200, productSyncStatus(index));
         }
-        if (!index.complete) {
+        const indexedThrough = Number(index.searchIndexedThrough || 0);
+        const detailTotal = Number(index.detailTotal || 0);
+        if (indexedThrough < detailTotal) {
+          const number = Math.floor(indexedThrough / HEALTH_PRODUCT_CHUNK_SIZE);
+          const details = await getHealthProductDetailChunk(number, options);
+          await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(details), options);
+          index.searchIndexedThrough = Math.min(detailTotal, (number + 1) * HEALTH_PRODUCT_CHUNK_SIZE);
+          index.updatedAt = new Date().toISOString();
+          await saveHealthProductsIndex(index, options);
+        } else if (detailTotal < index.total) {
           const start = Number(index.nextDetailIndex || 0);
           const fetched = await fetchHealthProductDetails(index.items.slice(start, start + 60));
           const grouped = new Map();
@@ -144,19 +163,18 @@ const server = createServer(async (request, response) => {
             const current = await getHealthProductDetailChunk(number, options);
             const byId = new Map(current.map((item) => [item.id, item]));
             items.forEach((item) => byId.set(item.id, item));
-            await saveHealthProductDetailChunk(number, [...byId.values()], options);
+            const merged = [...byId.values()];
+            await saveHealthProductDetailChunk(number, merged, options);
+            await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(merged), options);
           }
           index.nextDetailIndex = start + fetched.length;
           index.detailTotal = index.nextDetailIndex;
+          index.searchIndexedThrough = index.detailTotal;
           index.complete = index.detailTotal >= index.total;
           index.updatedAt = new Date().toISOString();
           await saveHealthProductsIndex(index, options);
         }
-        return sendJson(response, 200, {
-          total: index.total, detailTotal: index.detailTotal, complete: index.complete,
-          progress: index.total ? Math.floor(index.detailTotal / index.total * 1000) / 10 : 0,
-          syncedAt: index.syncedAt, updatedAt: index.updatedAt || null
-        });
+        return sendJson(response, 200, productSyncStatus(index));
       }
     }
 
@@ -272,7 +290,7 @@ function handleError(response, error) {
   }
 
   console.error(error);
-  sendJson(response, 500, {
+  sendJson(response, Number(error.status) || 500, {
     error: error.message || "Internal server error",
     details: error.stack ? error.stack.split("\n").slice(0, 3).join("\n") : null
   });
@@ -281,6 +299,19 @@ function handleError(response, error) {
 function sendJson(response, status, payload) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function productSyncStatus(index) {
+  const detailTotal = Number(index.detailTotal || 0);
+  const searchIndexedThrough = Number(index.searchIndexedThrough || 0);
+  const detailComplete = detailTotal >= Number(index.total || 0);
+  return {
+    total: index.total || 0, detailTotal, searchIndexedThrough, detailComplete,
+    complete: detailComplete && searchIndexedThrough >= detailTotal,
+    progress: index.total ? Math.floor(Math.min(detailTotal, searchIndexedThrough) / index.total * 1000) / 10 : 0,
+    searchProgress: detailTotal ? Math.floor(searchIndexedThrough / detailTotal * 1000) / 10 : 100,
+    syncedAt: index.syncedAt, updatedAt: index.updatedAt || null
+  };
 }
 
 function contentType(filePath) {

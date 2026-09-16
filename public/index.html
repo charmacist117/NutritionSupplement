@@ -419,7 +419,7 @@
         <div class="ingredients-header">
           <div>
             <h2>건강기능식품 조합 검색</h2>
-            <p>식품안전나라 건강기능식품 전체 목록과 연결된 제품 상세 표를 저장하고 검색합니다.</p>
+            <p>제품 상세정보의 성분 및 원료를 기준으로 원하는 주원료 조합을 검색합니다.</p>
           </div>
           <div class="ingredients-actions">
             <a class="source-link" href="https://www.foodsafetykorea.go.kr/portal/specialinfo/searchInfoProduct.do" target="_blank" rel="noreferrer">원문 보기</a>
@@ -427,16 +427,16 @@
           </div>
         </div>
         <form id="products-search-form" class="product-search-controls">
-          <label>포함단어<input id="products-includes" type="search" placeholder="제품명, 업체명, 품목유형"></label>
-          <label>미포함단어<input id="products-excludes" type="search" placeholder="제외할 단어"></label>
+          <label>주원료 검색식<input id="products-query" type="search" placeholder="오메가3 AND 비타민D"></label>
           <button type="submit">검색</button>
         </form>
+        <p class="product-query-help"><strong>검색식:</strong> AND는 모두 포함, OR는 하나 이상 포함, NOT은 제외하며 괄호와 따옴표 구문을 사용할 수 있습니다. 예: <code>(마그네슘 OR 칼슘) AND 비타민D AND NOT 아연</code></p>
         <p id="products-status" class="comparison-status">저장된 제품 자료를 불러옵니다.</p>
         <progress id="products-progress" max="100" value="0"></progress>
         <div class="table-wrap products-table-wrap">
           <table>
-            <thead><tr><th>상세</th><th>제품명</th><th>업체명</th><th>품목보고번호</th><th>품목유형</th><th>소비기한</th><th>내수/수출</th><th></th></tr></thead>
-            <tbody id="products-body"><tr><td colspan="8">자료를 불러오지 않았습니다.</td></tr></tbody>
+            <thead><tr><th>상세</th><th>제품명</th><th>주원료</th><th>업체명</th><th>품목보고번호</th><th>품목유형</th><th>소비기한</th><th>내수/수출</th><th></th></tr></thead>
+            <tbody id="products-body"><tr><td colspan="9">자료를 불러오지 않았습니다.</td></tr></tbody>
           </table>
         </div>
         <div class="ingredients-pagination">
