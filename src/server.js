@@ -8,6 +8,7 @@ import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, ge
 import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
+import { fetchIndividualIngredients } from "./individualIngredients.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -90,6 +91,10 @@ const server = createServer(async (request, response) => {
         "Content-Length": pdf.length
       });
       return response.end(pdf);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/individual-ingredients") {
+      return sendJson(response, 200, await fetchIndividualIngredients({ page: url.searchParams.get("page"), query: url.searchParams.get("q") }));
     }
 
     if (request.method === "POST" && url.pathname === "/api/comparison-report") {

@@ -11,7 +11,7 @@
       <section class="summary-band">
         <div>
           <p class="eyebrow">Naver Shopping Insight</p>
-          <h1>건강식품 기간별 검색어 리포트</h1>
+          <h1>건강식품 시장현황</h1>
           <p id="status">설정 상태를 확인하는 중입니다.</p>
         </div>
 
@@ -34,6 +34,7 @@
         <button class="tab-button" type="button" data-tab="mapping">키워드 카테고리 매칭</button>
         <button class="tab-button" type="button" data-tab="category-status">카테고리 현황</button>
         <button class="tab-button" type="button" data-tab="comparison">기간별 비교</button>
+        <button class="tab-button" type="button" data-tab="ingredients">개별인정형 원료</button>
         <button class="tab-button" type="button" data-tab="settings">환경설정</button>
       </nav>
 
@@ -382,6 +383,32 @@
             </table>
           </div>
         </section>
+      </section>
+
+      <section class="ingredients-panel tab-view" data-tab-view="ingredients">
+        <div class="ingredients-header">
+          <div>
+            <h2>개별인정형 원료</h2>
+            <p>식품안전나라 건강기능식품 원료별 정보의 개별인정원료를 게시글별로 불러옵니다.</p>
+          </div>
+          <a class="source-link" href="https://www.foodsafetykorea.go.kr/portal/board/board.do?menu_grp=MENU_NEW01&amp;menu_no=2660" target="_blank" rel="noreferrer">원문 보기</a>
+        </div>
+        <form id="ingredients-search-form" class="ingredients-controls">
+          <label>원료 검색<input id="ingredients-search" type="search" placeholder="원료명 또는 업체명"></label>
+          <button type="submit">검색</button>
+        </form>
+        <p id="ingredients-status" class="comparison-status">탭을 열면 최신 자료를 불러옵니다.</p>
+        <div class="table-wrap ingredients-table-wrap">
+          <table>
+            <thead><tr><th>번호</th><th>공시일자</th><th>허가 유효여부</th><th>원료명</th><th>인정번호</th><th>업체명</th><th>기능성내용</th><th>일일섭취량</th><th>섭취 시 주의사항</th><th>기타</th></tr></thead>
+            <tbody id="ingredients-body"><tr><td colspan="10">자료를 불러오지 않았습니다.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="ingredients-pagination">
+          <button id="ingredients-prev" class="secondary-button" type="button" disabled>이전</button>
+          <span id="ingredients-page">1 / 1</span>
+          <button id="ingredients-next" class="secondary-button" type="button" disabled>다음</button>
+        </div>
       </section>
 
       <section class="settings-panel tab-view" data-tab-view="settings">
