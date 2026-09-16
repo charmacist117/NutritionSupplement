@@ -38,7 +38,7 @@ export async function syncHealthFunctionalIngredients() {
 
 export function pageHealthFunctionalIngredients(cache, { page = 1, query = "" } = {}) {
   const normalizedQuery = searchKey(query);
-  const items = (cache?.items || []).filter((item) => !normalizedQuery || [item.ingredient, item.company]
+  const items = (cache?.items || []).filter((item) => !normalizedQuery || [item.ingredient, item.company, item.functionality]
     .some((value) => searchKey(value).includes(normalizedQuery)));
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
@@ -116,6 +116,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes(
   assert.equal(parsed.company, "테스트㈜");
   assert.equal(parsed.cautions, "임산부는 주의할 것");
   assert.equal(parsed.cancelled, true);
-  assert.equal(pageHealthFunctionalIngredients({ items: [{ ingredient: "원료A", company: "고려은단" }, { ingredient: "루테인", company: "다른회사" }] }, { query: "고려은단" }).total, 1);
+  const sample = { items: [{ ingredient: "원료A", company: "고려은단", functionality: "눈 건강" }, { ingredient: "루테인", company: "다른회사", functionality: "체지방 감소" }] };
+  assert.equal(pageHealthFunctionalIngredients(sample, { query: "고려은단" }).total, 1);
+  assert.equal(pageHealthFunctionalIngredients(sample, { query: "눈 건강" }).total, 1);
   console.log("health functional ingredient parser ok");
 }
