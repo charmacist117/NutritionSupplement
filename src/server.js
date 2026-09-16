@@ -5,10 +5,10 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, getNaverCredentialProfiles, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { deleteMonthlyReport, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
+import { deleteMonthlyReport, getHealthFunctionalIngredients, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveHealthFunctionalIngredients, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
-import { fetchIndividualIngredients } from "./individualIngredients.js";
+import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -93,8 +93,21 @@ const server = createServer(async (request, response) => {
       return response.end(pdf);
     }
 
-    if (request.method === "GET" && url.pathname === "/api/individual-ingredients") {
-      return sendJson(response, 200, await fetchIndividualIngredients({ page: url.searchParams.get("page"), query: url.searchParams.get("q") }));
+    if (url.pathname === "/api/individual-ingredients") {
+      const options = { outputDir: join(rootDir, "data", "ingredients") };
+      if (request.method === "GET") {
+        const saved = await getHealthFunctionalIngredients(options);
+        return saved
+          ? sendJson(response, 200, pageHealthFunctionalIngredients(saved, { page: url.searchParams.get("page"), query: url.searchParams.get("q") }))
+          : sendJson(response, 404, { error: "저장된 원료 자료가 없습니다. 전체 동기화를 실행해주세요." });
+      }
+      if (request.method === "POST") {
+        const synced = await syncHealthFunctionalIngredients();
+        const storage = await saveHealthFunctionalIngredients(synced, options);
+        return storage.saved
+          ? sendJson(response, 200, { ...pageHealthFunctionalIngredients(synced), storage })
+          : sendJson(response, 503, { error: "Blob 저장소가 연결되어야 원료 자료를 저장할 수 있습니다.", storage });
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/api/comparison-report") {

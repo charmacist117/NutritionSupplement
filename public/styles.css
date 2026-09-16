@@ -186,6 +186,12 @@ button:disabled {
   margin-bottom: 0;
 }
 
+.ingredients-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .source-link {
   flex: 0 0 auto;
   color: var(--accent-strong);

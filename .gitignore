@@ -1,6 +1,7 @@
 .env
 node_modules/
 data/monthly/
+data/ingredients/
 *.log
 .DS_Store
 Thumbs.db

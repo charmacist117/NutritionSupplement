@@ -70,6 +70,7 @@ const comparisonKeywordHead = document.querySelector("#comparison-keyword-head")
 const comparisonKeywordBody = document.querySelector("#comparison-keyword-body");
 const ingredientsSearchForm = document.querySelector("#ingredients-search-form");
 const ingredientsSearch = document.querySelector("#ingredients-search");
+const ingredientsSyncButton = document.querySelector("#ingredients-sync");
 const ingredientsStatus = document.querySelector("#ingredients-status");
 const ingredientsBody = document.querySelector("#ingredients-body");
 const ingredientsPrevButton = document.querySelector("#ingredients-prev");
@@ -274,6 +275,22 @@ apiProfileSaveButton.addEventListener("click", () => saveActiveApiProfile());
 ingredientsSearchForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadIngredients(1);
+});
+ingredientsSyncButton.addEventListener("click", async () => {
+  ingredientsSyncButton.disabled = true;
+  ingredientsStatus.textContent = "식품안전나라 전체 원료 자료를 동기화하고 저장하는 중입니다.";
+  try {
+    const response = await fetch("/api/individual-ingredients", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "원료 자료를 저장하지 못했습니다.");
+    ingredientsLoaded = true;
+    ingredientsSearch.value = "";
+    await loadIngredients(1);
+  } catch (error) {
+    ingredientsStatus.textContent = error.message;
+  } finally {
+    ingredientsSyncButton.disabled = false;
+  }
 });
 ingredientsPrevButton.addEventListener("click", () => loadIngredients(ingredientsCurrentPage - 1));
 ingredientsNextButton.addEventListener("click", () => loadIngredients(ingredientsCurrentPage + 1));
@@ -508,14 +525,14 @@ async function setActiveTab(tab) {
 }
 
 async function loadIngredients(page) {
-  ingredientsStatus.textContent = "식품안전나라 자료를 불러오는 중입니다.";
+  ingredientsStatus.textContent = "저장된 원료 자료를 불러오는 중입니다.";
   ingredientsPrevButton.disabled = true;
   ingredientsNextButton.disabled = true;
   try {
     const params = new URLSearchParams({ page: String(Math.max(1, page)), q: ingredientsSearch.value.trim() });
     const response = await fetch(`/api/individual-ingredients?${params}`);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "개별인정형 원료를 불러오지 못했습니다.");
+    if (!response.ok) throw new Error(data.error || "건강기능식품 원료를 불러오지 못했습니다.");
     ingredientsLoaded = true;
     ingredientsCurrentPage = data.page;
     ingredientsBody.innerHTML = data.items.length ? data.items.map((item) => `
@@ -524,13 +541,16 @@ async function loadIngredients(page) {
         <td><strong>${escapeHtml(item.ingredient)}</strong></td><td>${escapeHtml(item.recognitionNumber)}</td><td>${escapeHtml(item.company)}</td>
         <td>${escapeHtml(item.functionality)}</td><td>${escapeHtml(item.dailyIntake)}</td><td>${escapeHtml(item.cautions)}</td><td>${escapeHtml(item.other)}</td>
       </tr>`).join("") : '<tr><td colspan="10">검색 결과가 없습니다.</td></tr>';
-    ingredientsStatus.textContent = `총 ${data.total.toLocaleString("ko-KR")}건 · ${data.source}`;
+    const syncedAt = data.syncedAt ? ` · 동기화 ${new Date(data.syncedAt).toLocaleDateString("ko-KR")}` : "";
+    ingredientsStatus.textContent = `총 ${data.total.toLocaleString("ko-KR")}건 · ${data.source}${syncedAt}`;
     ingredientsPage.textContent = `${data.page} / ${data.totalPages}`;
     ingredientsPrevButton.disabled = data.page <= 1;
     ingredientsNextButton.disabled = data.page >= data.totalPages;
   } catch (error) {
-    ingredientsBody.innerHTML = '<tr><td colspan="10">자료를 불러오지 못했습니다.</td></tr>';
+    ingredientsLoaded = true;
+    ingredientsBody.innerHTML = `<tr><td colspan="10">${escapeHtml(error.message)}</td></tr>`;
     ingredientsStatus.textContent = error.message;
+    ingredientsPage.textContent = "1 / 1";
   }
 }
 

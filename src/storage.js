@@ -3,8 +3,10 @@ import { join } from "node:path";
 
 const MONTHLY_PREFIX = "monthly";
 const SETTINGS_PREFIX = "settings";
+const INGREDIENTS_PREFIX = "ingredients";
 const KEYWORD_CATEGORY_MAPPINGS_PATH = `${SETTINGS_PREFIX}/keyword-category-mappings.json`;
 const NAVER_API_SETTINGS_PATH = `${SETTINGS_PREFIX}/naver-api-settings.json`;
+const HEALTH_FUNCTIONAL_INGREDIENTS_PATH = `${INGREDIENTS_PREFIX}/health-functional-ingredients.json`;
 const BLOB_ACCESS = "private";
 
 export async function saveMonthlyReport(result, options = {}) {
@@ -194,6 +196,41 @@ export async function saveNaverApiSettings(input, options = {}) {
   return payload;
 }
 
+export async function getHealthFunctionalIngredients(options = {}) {
+  if (shouldUseBlob()) {
+    const text = await getBlobText(HEALTH_FUNCTIONAL_INGREDIENTS_PATH);
+    return text ? normalizeHealthFunctionalIngredients(JSON.parse(text)) : null;
+  }
+
+  try {
+    const outputDir = options.outputDir || join(process.cwd(), "data", "ingredients");
+    return normalizeHealthFunctionalIngredients(JSON.parse(await readFile(join(outputDir, "health-functional-ingredients.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+export async function saveHealthFunctionalIngredients(input, options = {}) {
+  const payload = normalizeHealthFunctionalIngredients(input);
+
+  if (shouldUseBlob()) {
+    const { put } = await import("@vercel/blob");
+    await put(HEALTH_FUNCTIONAL_INGREDIENTS_PATH, JSON.stringify(payload), {
+      access: BLOB_ACCESS,
+      allowOverwrite: true,
+      contentType: "application/json"
+    });
+    return { saved: true, storage: "blob", total: payload.total };
+  }
+
+  if (process.env.VERCEL) return { saved: false, storage: "none", reason: "Blob credentials are not configured." };
+
+  const outputDir = options.outputDir || join(process.cwd(), "data", "ingredients");
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, "health-functional-ingredients.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return { saved: true, storage: "file", total: payload.total };
+}
+
 function shouldUseBlob() {
   return hasBlobCredentials();
 }
@@ -279,6 +316,22 @@ function normalizeNaverApiSettings(input = {}) {
   return {
     activeProfile: String(input.activeProfile || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 40),
     updatedAt: input.updatedAt || null
+  };
+}
+
+function normalizeHealthFunctionalIngredients(input = {}) {
+  const items = Array.isArray(input.items) ? input.items.map((item) => ({
+    number: String(item.number || ""), registeredDate: String(item.registeredDate || ""), validity: String(item.validity || ""),
+    ingredient: String(item.ingredient || ""), recognitionNumber: String(item.recognitionNumber || ""), company: String(item.company || ""),
+    functionality: String(item.functionality || ""), dailyIntake: String(item.dailyIntake || ""), cautions: String(item.cautions || ""),
+    other: String(item.other || ""), category: String(item.category || "")
+  })).filter((item) => item.ingredient) : [];
+  return {
+    syncedAt: input.syncedAt || null,
+    source: String(input.source || "식품안전나라 건강기능식품 원료별 정보"),
+    sourceUrl: String(input.sourceUrl || ""),
+    total: items.length,
+    items
   };
 }
 
