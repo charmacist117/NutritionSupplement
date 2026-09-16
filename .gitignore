@@ -2,6 +2,7 @@
 node_modules/
 data/monthly/
 data/ingredients/
+data/health-products/
 *.log
 .DS_Store
 Thumbs.db

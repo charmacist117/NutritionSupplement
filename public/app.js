@@ -76,6 +76,21 @@ const ingredientsBody = document.querySelector("#ingredients-body");
 const ingredientsPrevButton = document.querySelector("#ingredients-prev");
 const ingredientsNextButton = document.querySelector("#ingredients-next");
 const ingredientsPage = document.querySelector("#ingredients-page");
+const productsSearchForm = document.querySelector("#products-search-form");
+const productsIncludes = document.querySelector("#products-includes");
+const productsExcludes = document.querySelector("#products-excludes");
+const productsSyncButton = document.querySelector("#products-sync");
+const productsStatus = document.querySelector("#products-status");
+const productsProgress = document.querySelector("#products-progress");
+const productsBody = document.querySelector("#products-body");
+const productsPrevButton = document.querySelector("#products-prev");
+const productsNextButton = document.querySelector("#products-next");
+const productsPage = document.querySelector("#products-page");
+const productDetailDialog = document.querySelector("#product-detail-dialog");
+const productDetailTitle = document.querySelector("#product-detail-title");
+const productDetailMeta = document.querySelector("#product-detail-meta");
+const productDetailTables = document.querySelector("#product-detail-tables");
+const productDetailClose = document.querySelector("#product-detail-close");
 const apiSettingsRefreshButton = document.querySelector("#api-settings-refresh");
 const apiSettingsSummary = document.querySelector("#api-settings-summary");
 const apiActiveProfile = document.querySelector("#api-active-profile");
@@ -164,6 +179,10 @@ let executiveBaselineKeys = new Set();
 let executiveCurrentKeys = new Set();
 let ingredientsLoaded = false;
 let ingredientsCurrentPage = 1;
+let productsLoaded = false;
+let productsCurrentPage = 1;
+let productsSyncing = false;
+let productRows = new Map();
 let healthState = {
   naverConfigured: false,
   blobConfigured: false
@@ -294,6 +313,18 @@ ingredientsSyncButton.addEventListener("click", async () => {
 });
 ingredientsPrevButton.addEventListener("click", () => loadIngredients(ingredientsCurrentPage - 1));
 ingredientsNextButton.addEventListener("click", () => loadIngredients(ingredientsCurrentPage + 1));
+productsSearchForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadProducts(1);
+});
+productsSyncButton.addEventListener("click", () => productsSyncing ? stopProductSync() : syncProducts());
+productsPrevButton.addEventListener("click", () => loadProducts(productsCurrentPage - 1));
+productsNextButton.addEventListener("click", () => loadProducts(productsCurrentPage + 1));
+productsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-product-id]");
+  if (button) showProductDetail(productRows.get(button.dataset.productId));
+});
+productDetailClose.addEventListener("click", () => productDetailDialog.close());
 
 for (const button of comparisonModeButtons) {
   button.addEventListener("click", async () => {
@@ -521,6 +552,7 @@ async function setActiveTab(tab) {
   if (tab === "category-status") await renderCategoryStatusSheet();
   if (tab === "comparison") await renderComparisonSheet();
   if (tab === "ingredients" && !ingredientsLoaded) await loadIngredients(1);
+  if (tab === "products" && !productsLoaded) await loadProducts(1);
   if (tab === "settings") await loadApiSettings();
 }
 
@@ -552,6 +584,80 @@ async function loadIngredients(page) {
     ingredientsStatus.textContent = error.message;
     ingredientsPage.textContent = "1 / 1";
   }
+}
+
+async function loadProducts(page = 1) {
+  productsStatus.textContent = "저장된 건강기능식품 제품 자료를 불러오는 중입니다.";
+  productsPrevButton.disabled = true;
+  productsNextButton.disabled = true;
+  const params = new URLSearchParams({ page: String(Math.max(1, page)), includes: productsIncludes.value.trim(), excludes: productsExcludes.value.trim() });
+  try {
+    const response = await fetch(`/api/health-products?${params}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "제품 자료를 불러오지 못했습니다.");
+    productsLoaded = true;
+    productsCurrentPage = data.page;
+    productRows = new Map(data.items.map((item) => [item.id, item]));
+    productsBody.innerHTML = data.items.length ? data.items.map((item) => `
+      <tr>
+        <td><span class="status-badge ${item.detail ? "active" : ""}">${item.detail ? "저장" : "대기"}</span></td>
+        <td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.company)}</td>
+        <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
+        <td>${item.detail ? `<button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button>` : "-"}</td>
+      </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
+    productsStatus.textContent = `검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건${data.complete ? " · 수집 완료" : ""}`;
+    productsProgress.value = data.indexedTotal ? data.detailTotal / data.indexedTotal * 100 : 0;
+    productsPage.textContent = `${data.page} / ${data.totalPages}`;
+    productsPrevButton.disabled = data.page <= 1;
+    productsNextButton.disabled = data.page >= data.totalPages;
+  } catch (error) {
+    productsLoaded = true;
+    productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
+    productsStatus.textContent = error.message;
+    productsPage.textContent = "1 / 1";
+  }
+}
+
+async function syncProducts() {
+  productsSyncing = true;
+  productsSyncButton.textContent = "수집 중지";
+  while (productsSyncing) {
+    try {
+      const response = await fetch("/api/health-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "제품 자료를 수집하지 못했습니다.");
+      productsProgress.value = data.progress;
+      productsStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 · 상세 저장 ${data.detailTotal.toLocaleString("ko-KR")}건 · ${data.progress}%`;
+      productsLoaded = false;
+      if (data.complete) {
+        productsStatus.textContent += " · 수집 완료";
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (error) {
+      productsStatus.textContent = error.message;
+      break;
+    }
+  }
+  stopProductSync();
+  await loadProducts(productsCurrentPage);
+}
+
+function stopProductSync() {
+  productsSyncing = false;
+  productsSyncButton.textContent = "전체 수집";
+}
+
+function showProductDetail(item) {
+  if (!item?.detail) return;
+  productDetailTitle.textContent = item.name;
+  productDetailMeta.textContent = `${item.company} · ${item.reportNumber}`;
+  productDetailTables.innerHTML = item.detail.tables.map((table, index) => `
+    <section class="product-detail-table">
+      <h3>상세 표 ${index + 1}</h3>
+      <div class="table-wrap"><table><tbody>${table.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+    </section>`).join("");
+  productDetailDialog.showModal();
 }
 
 function activeTab() {

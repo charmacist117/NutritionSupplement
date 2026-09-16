@@ -35,6 +35,7 @@
         <button class="tab-button" type="button" data-tab="category-status">카테고리 현황</button>
         <button class="tab-button" type="button" data-tab="comparison">기간별 비교</button>
         <button class="tab-button" type="button" data-tab="ingredients">건강기능식품 원료</button>
+        <button class="tab-button" type="button" data-tab="products">조합 검색</button>
         <button class="tab-button" type="button" data-tab="settings">환경설정</button>
       </nav>
 
@@ -413,6 +414,45 @@
           <button id="ingredients-next" class="secondary-button" type="button" disabled>다음</button>
         </div>
       </section>
+
+      <section class="products-panel tab-view" data-tab-view="products">
+        <div class="ingredients-header">
+          <div>
+            <h2>건강기능식품 조합 검색</h2>
+            <p>식품안전나라 건강기능식품 전체 목록과 연결된 제품 상세 표를 저장하고 검색합니다.</p>
+          </div>
+          <div class="ingredients-actions">
+            <a class="source-link" href="https://www.foodsafetykorea.go.kr/portal/specialinfo/searchInfoProduct.do" target="_blank" rel="noreferrer">원문 보기</a>
+            <button id="products-sync" type="button">전체 수집</button>
+          </div>
+        </div>
+        <form id="products-search-form" class="product-search-controls">
+          <label>포함단어<input id="products-includes" type="search" placeholder="제품명, 업체명, 품목유형"></label>
+          <label>미포함단어<input id="products-excludes" type="search" placeholder="제외할 단어"></label>
+          <button type="submit">검색</button>
+        </form>
+        <p id="products-status" class="comparison-status">저장된 제품 자료를 불러옵니다.</p>
+        <progress id="products-progress" max="100" value="0"></progress>
+        <div class="table-wrap products-table-wrap">
+          <table>
+            <thead><tr><th>상세</th><th>제품명</th><th>업체명</th><th>품목보고번호</th><th>품목유형</th><th>소비기한</th><th>내수/수출</th><th></th></tr></thead>
+            <tbody id="products-body"><tr><td colspan="8">자료를 불러오지 않았습니다.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="ingredients-pagination">
+          <button id="products-prev" class="secondary-button" type="button" disabled>이전</button>
+          <span id="products-page">1 / 1</span>
+          <button id="products-next" class="secondary-button" type="button" disabled>다음</button>
+        </div>
+      </section>
+
+      <dialog id="product-detail-dialog" class="product-detail-dialog">
+        <div class="product-detail-heading">
+          <div><h2 id="product-detail-title">제품 상세정보</h2><p id="product-detail-meta"></p></div>
+          <button id="product-detail-close" class="secondary-button" type="button" aria-label="상세정보 닫기">닫기</button>
+        </div>
+        <div id="product-detail-tables"></div>
+      </dialog>
 
       <section class="settings-panel tab-view" data-tab-view="settings">
         <div class="settings-header">
