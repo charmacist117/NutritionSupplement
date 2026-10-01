@@ -154,7 +154,7 @@ export async function saveKeywordCategoryMappings(input, options = {}) {
   }
 
   if (process.env.VERCEL) {
-    return payload;
+    throw new Error("Blob 저장소가 연결되지 않아 카테고리를 저장하지 못했습니다. 저장소 연결 후 다시 저장해주세요.");
   }
 
   const outputDir = options.outputDir || join(process.cwd(), "data", "settings");

@@ -1252,6 +1252,9 @@ function updateCategoryMapping(keyword, category, slot = 0) {
 
 async function saveCategoryMappingsFromSheet() {
   mappingSaveButton.disabled = true;
+  categoryAddButton.disabled = true;
+  categoryRenameButton.disabled = true;
+  categoryDeleteButton.disabled = true;
   mappingStatus.textContent = "카테고리 매칭을 저장하는 중입니다.";
 
   try {
@@ -1263,6 +1266,8 @@ async function saveCategoryMappingsFromSheet() {
     mappingStatus.textContent = error.message;
   } finally {
     mappingSaveButton.disabled = false;
+    categoryAddButton.disabled = false;
+    updateCategoryManagerOptions();
   }
 }
 
@@ -1337,7 +1342,8 @@ function updateCategoryManagerOptions(preferredCategory = "") {
   categoryDeleteButton.disabled = productCategories.length <= 1;
 }
 
-function addProductCategory() {
+async function addProductCategory() {
+  if (mappingSaveButton.disabled) return;
   const category = String(categoryAddInput.value || "").trim();
   if (!category) {
     mappingStatus.textContent = "추가할 카테고리 이름을 입력해주세요.";
@@ -1354,10 +1360,11 @@ function addProductCategory() {
   updateCategoryManagerOptions(category);
   renderMappingSummary();
   renderMappingRows();
-  mappingStatus.textContent = `${category} 카테고리를 추가했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  await saveCategoryMappingsFromSheet();
 }
 
-function renameProductCategory() {
+async function renameProductCategory() {
+  if (mappingSaveButton.disabled) return;
   const previous = categoryManageSelect.value;
   const next = String(categoryRenameInput.value || "").trim();
   if (!previous || !next || previous === next) return;
@@ -1384,10 +1391,11 @@ function renameProductCategory() {
   updateCategoryManagerOptions(next);
   renderMappingSummary();
   renderMappingRows();
-  mappingStatus.textContent = `${previous}을(를) ${next}(으)로 변경했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  await saveCategoryMappingsFromSheet();
 }
 
-function deleteProductCategory() {
+async function deleteProductCategory() {
+  if (mappingSaveButton.disabled) return;
   const category = categoryManageSelect.value;
   if (!category || productCategories.length <= 1) return;
   const mappedCount = [...categoryMappings.values()].filter((item) => mappingCategoriesFromItem(item).includes(category)).length;
@@ -1412,7 +1420,7 @@ function deleteProductCategory() {
   updateCategoryManagerOptions();
   renderMappingSummary();
   renderMappingRows();
-  mappingStatus.textContent = `${category} 카테고리를 삭제했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  await saveCategoryMappingsFromSheet();
 }
 
 function manualCategoryFor(keyword) {
