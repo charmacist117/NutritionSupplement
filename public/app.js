@@ -1342,7 +1342,7 @@ function updateCategoryManagerOptions(preferredCategory = "") {
   categoryDeleteButton.disabled = productCategories.length <= 1;
 }
 
-async function addProductCategory() {
+function addProductCategory() {
   if (mappingSaveButton.disabled) return;
   const category = String(categoryAddInput.value || "").trim();
   if (!category) {
@@ -1360,10 +1360,11 @@ async function addProductCategory() {
   updateCategoryManagerOptions(category);
   renderMappingSummary();
   renderMappingRows();
-  await saveCategoryMappingsFromSheet();
+  mappingStatus.textContent = `${category} 카테고리를 추가했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  window.alert("추가한 카테고리는 변경사항 저장을 눌러야 확실히 저장됩니다.");
 }
 
-async function renameProductCategory() {
+function renameProductCategory() {
   if (mappingSaveButton.disabled) return;
   const previous = categoryManageSelect.value;
   const next = String(categoryRenameInput.value || "").trim();
@@ -1391,10 +1392,10 @@ async function renameProductCategory() {
   updateCategoryManagerOptions(next);
   renderMappingSummary();
   renderMappingRows();
-  await saveCategoryMappingsFromSheet();
+  mappingStatus.textContent = `${previous}을(를) ${next}(으)로 변경했습니다. 변경사항 저장을 눌러 확정해주세요.`;
 }
 
-async function deleteProductCategory() {
+function deleteProductCategory() {
   if (mappingSaveButton.disabled) return;
   const category = categoryManageSelect.value;
   if (!category || productCategories.length <= 1) return;
@@ -1420,7 +1421,7 @@ async function deleteProductCategory() {
   updateCategoryManagerOptions();
   renderMappingSummary();
   renderMappingRows();
-  await saveCategoryMappingsFromSheet();
+  mappingStatus.textContent = `${category} 카테고리를 삭제했습니다. 변경사항 저장을 눌러 확정해주세요.`;
 }
 
 function manualCategoryFor(keyword) {
