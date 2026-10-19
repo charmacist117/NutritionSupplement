@@ -227,7 +227,7 @@ button:disabled {
 
 .product-search-controls {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) auto;
+  grid-template-columns: auto minmax(320px, 1fr) auto auto;
   gap: 12px;
   align-items: end;
 }
@@ -256,6 +256,25 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.product-search-controls input[type="search"],
+.product-search-controls select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--panel);
+  font: inherit;
+}
+
+.product-search-controls .product-export-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  white-space: nowrap;
 }
 
 .products-panel progress {

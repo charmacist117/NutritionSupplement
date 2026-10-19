@@ -20,6 +20,8 @@ export async function fetchHealthProductIndex() {
   const items = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ko")).map((item, index) => ({ ...item, index }));
   return {
     syncedAt: new Date().toISOString(), sourceUrl: HEALTH_PRODUCTS_SOURCE_URL,
+    listComplete: true, sourceCounts: { included: included.length, excluded: excluded.length },
+    duplicateCount: included.length + excluded.length - items.length,
     total: items.length, detailTotal: 0, nextDetailIndex: 0, searchIndexedThrough: 0, complete: !items.length, items
   };
 }
@@ -32,6 +34,10 @@ export async function fetchHealthProductDetails(items, { concurrency = 10 } = {}
     while (cursor < items.length) {
       const index = cursor++;
       const item = items[index];
+      if (item.active === false) {
+        results[index] = { ...item, tables: [] };
+        continue;
+      }
       try {
         results[index] = { ...item, ...await fetchProductDetail(session, item) };
       } catch (error) {
@@ -42,8 +48,26 @@ export async function fetchHealthProductDetails(items, { concurrency = 10 } = {}
   return results;
 }
 
-export function pageHealthProducts(index, details, { page = 1, matchedIds = null } = {}) {
-  const filtered = matchedIds ? (index?.items || []).filter((item) => matchedIds.has(item.id)) : (index?.items || []);
+export function refreshHealthProductIndex(current, fetched) {
+  if (!current) return fetched;
+  if (!fetched.items.length && current.items.length) throw new Error("새 제품 목록이 비어 있어 기존 자료를 유지합니다.");
+  const byId = new Map(fetched.items.map((item) => [item.id, item]));
+  const existingIds = new Set(current.items.map((item) => item.id));
+  const items = current.items.map((item) => ({ ...item, ...byId.get(item.id), index: item.index, active: byId.has(item.id) }));
+  for (const item of fetched.items) {
+    if (!existingIds.has(item.id)) items.push({ ...item, index: items.length, active: true });
+  }
+  return { ...current, items, total: items.length, activeTotal: fetched.items.length, syncedAt: fetched.syncedAt,
+    sourceCounts: fetched.sourceCounts, duplicateCount: fetched.duplicateCount, listComplete: fetched.listComplete,
+    complete: items.length <= current.detailTotal && current.searchIndexedThrough >= current.detailTotal };
+}
+
+export function pageHealthProducts(index, details, { page = 1, matchedIds = null, keyword = "", includeExport = true } = {}) {
+  const term = searchKey(keyword);
+  const activeItems = (index?.items || []).filter((item) => item.active !== false);
+  const filtered = activeItems.filter((item) => (!matchedIds || matchedIds.has(item.id))
+    && (includeExport || !/[（(]\s*수출용\s*[)）]/.test(item.name || ""))
+    && (!term || [item.name, item.company, item.reportNumber].some((value) => searchKey(value).includes(term))));
   const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PRODUCT_PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const start = (currentPage - 1) * HEALTH_PRODUCT_PAGE_SIZE;
@@ -51,11 +75,22 @@ export function pageHealthProducts(index, details, { page = 1, matchedIds = null
   return {
     page: currentPage, pageSize: HEALTH_PRODUCT_PAGE_SIZE, total: filtered.length, totalPages,
     items: filtered.slice(start, start + HEALTH_PRODUCT_PAGE_SIZE).map((item) => ({ ...item, detail: detailMap.get(item.id) || null })),
-    indexedTotal: index?.total || 0, detailTotal: index?.detailTotal || 0,
+    indexedTotal: activeItems.length, detailTotal: activeItems.filter((item) => item.index < (index?.detailTotal || 0)).length,
     searchIndexedThrough: index?.searchIndexedThrough || 0,
-    complete: Boolean(index?.complete) && Number(index?.searchIndexedThrough || 0) >= Number(index?.detailTotal || 0),
-    syncedAt: index?.syncedAt || null, sourceUrl: index?.sourceUrl || HEALTH_PRODUCTS_SOURCE_URL
+    complete: activeItems.every((item) => item.index < Number(index?.detailTotal || 0) && item.index < Number(index?.searchIndexedThrough || 0)),
+    syncedAt: index?.syncedAt || null, sourceUrl: index?.sourceUrl || HEALTH_PRODUCTS_SOURCE_URL,
+    listComplete: Boolean(index?.listComplete), sourceCounts: index?.sourceCounts || null
   };
+}
+
+export function healthProductListCsv(items) {
+  const rows = [["제품ID", "제품명", "업체명", "품목보고번호", "품목유형", "소비기한", "내수/수출", "분류코드"],
+    ...items.map((item) => [item.id, item.name, item.company, item.reportNumber, item.type, item.shelfLife, item.domesticExport, item.categoryCode])];
+  return "\uFEFF" + rows.map((row) => row.map((value) => {
+    let cell = String(value ?? "");
+    if (/^[\s]*[=+@-]|^[\t\r\n]/.test(cell)) cell = "'" + cell;
+    return `"${cell.replaceAll('"', '""')}"`;
+  }).join(",")).join("\r\n") + "\r\n";
 }
 
 export function buildHealthProductSearchRows(details) {
@@ -69,6 +104,16 @@ export function mergeHealthProductSearchRows(items, detailRows) {
     byId.set(row.id, { id: row.id, ingredients: [current?.ingredients, row.ingredients].filter(Boolean).join(" | ") });
   }
   return [...byId.values()];
+}
+
+export function filterHealthProducts(items, detailRows, query, target = "ingredients") {
+  if (target === "name") return filterHealthProductSearchRows(items.map((item) => ({ id: item.id, ingredients: item.name })), query);
+  const rows = mergeHealthProductSearchRows(items, detailRows);
+  if (target === "all") {
+    const names = new Map(items.map((item) => [item.id, item.name]));
+    for (const row of rows) row.ingredients = [names.get(row.id), row.ingredients].filter(Boolean).join(" | ");
+  }
+  return filterHealthProductSearchRows(rows, query);
 }
 
 export function filterHealthProductSearchRows(rows, query) {
@@ -129,7 +174,31 @@ async function fetchProductList(session, condition) {
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });
-  const response = await fetch(`${ORIGIN}/ajax/portal/specialinfo/searchPrdList_1.do`, {
+  const count = await requestProductList(session, "searchPrdListCnt_1", body);
+  if (count.totCnt === null || count.totCnt === undefined || count.totCnt === "" || !Number.isSafeInteger(Number(count.totCnt)) || Number(count.totCnt) < 0) {
+    throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
+  }
+  const expected = Number(count.totCnt);
+  const rows = [];
+  for (let page = 1; rows.length < expected; page++) {
+    body.set("s_page_num", String(page));
+    const payload = await requestProductList(session, "searchPrdList_1", body);
+    if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
+    const remaining = expected - rows.length;
+    if (payload.prdList.length !== Math.min(50000, remaining)) {
+      throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page}페이지). 기존 자료를 유지합니다. 다시 수집해주세요.`);
+    }
+    rows.push(...payload.prdList);
+  }
+  if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || row.FOOD_HF_LS_CL_CD !== "002")
+    || new Set(rows.map((row) => row.PRDLST_REPORT_LEDG_NO)).size !== expected) {
+    throw new Error("식품안전나라 제품 ID·분류·중복 검증에 실패했습니다. 다시 수집해주세요.");
+  }
+  return rows;
+}
+
+async function requestProductList(session, endpoint, body) {
+  const response = await fetch(`${ORIGIN}/ajax/portal/specialinfo/${endpoint}.do`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", Cookie: session.cookie, Referer: HEALTH_PRODUCTS_SOURCE_URL, "X-Requested-With": "XMLHttpRequest" },
     body,
@@ -137,9 +206,8 @@ async function fetchProductList(session, condition) {
   });
   if (!response.ok) throw new Error(`식품안전나라 제품 목록 오류 (${response.status})`);
   const payload = await response.json();
-  const rows = findArray(payload);
-  if (!rows) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
-  return rows;
+  if (!payload || typeof payload !== "object") throw new Error("식품안전나라 검색 응답이 올바르지 않습니다.");
+  return payload;
 }
 
 async function fetchProductDetail(session, item) {
@@ -158,16 +226,6 @@ function normalizeListItem(row) {
     type: String(row.PRDLST_CD_NM || ""), shelfLife: String(row.POG_DAYCNT || ""),
     domesticExport: String(row.PRDT_SIL_SRV || ""), categoryCode: String(row.PRDLST_CD || "")
   };
-}
-
-function findArray(value) {
-  if (Array.isArray(value)) return value;
-  if (!value || typeof value !== "object") return null;
-  for (const child of Object.values(value)) {
-    const found = findArray(child);
-    if (found) return found;
-  }
-  return null;
 }
 
 function ingredientText(tables) {
@@ -262,5 +320,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes(
   assert.deepEqual([...filterHealthProductSearchRows(searchRows, '"비타민 C"')], ["1"]);
   assert.throws(() => filterHealthProductSearchRows(searchRows, "비타민 AND"), /검색식/);
   assert.deepEqual([...filterHealthProductSearchRows(mergeHealthProductSearchRows([{ id: "3", type: "EPA 및 DHA 함유 유지" }], []), "EPA")], ["3"]);
+  assert.deepEqual([...filterHealthProductSearchRows([{ id: "4", ingredients: "뉴 마그네슘350+B6" }], "뉴 마그네슘350+B6")], ["4"]);
+  const targets = [{ id: "4", name: "뉴 마그네슘350+B6", type: "미네랄" }];
+  assert.deepEqual([...filterHealthProducts(targets, [{ id: "4", ingredients: "산화마그네슘" }], "뉴 AND 산화마그네슘", "all")], ["4"]);
+  assert.deepEqual([...filterHealthProducts(targets, [], "뉴 마그네슘350+B6", "name")], ["4"]);
+  assert.equal(filterHealthProducts(targets, [], "뉴", "ingredients").size, 0);
+  const refreshed = refreshHealthProductIndex({ items: [{ id: "1", name: "기존", index: 0 }, { id: "3", name: "사라진", index: 1 }], total: 2, detailTotal: 2, searchIndexedThrough: 2 },
+    { items: [{ id: "1", name: "변경" }, { id: "2", name: "신규" }], syncedAt: "today" });
+  assert.deepEqual(refreshed.items.map((item) => [item.id, item.name, item.index, item.active]), [["1", "변경", 0, true], ["3", "사라진", 1, false], ["2", "신규", 2, true]]);
+  assert.equal(pageHealthProducts(refreshed, [], {}).total, 2);
+  assert.equal(pageHealthProducts(refreshed, [], {}).detailTotal, 1);
+  assert.equal(refreshed.detailTotal, 2);
+  assert.equal(refreshed.complete, false);
+  assert.equal(pageHealthProducts(refreshHealthProductIndex(refreshed, { items: [{ id: "3", name: "복구" }], syncedAt: "later" }), [], {}).total, 1);
+  const exportIndex = { items: [{ id: "1", name: "일반 제품" }, { id: "2", name: "제품(수출용)" }, { id: "3", name: "제품（수출용）" }] };
+  assert.equal(pageHealthProducts(exportIndex, [], { includeExport: false }).total, 1);
+  assert.equal(pageHealthProducts(exportIndex, [], { includeExport: true }).total, 3);
   console.log("health product parser ok");
 }

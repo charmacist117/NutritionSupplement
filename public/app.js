@@ -78,7 +78,10 @@ const ingredientsNextButton = document.querySelector("#ingredients-next");
 const ingredientsPage = document.querySelector("#ingredients-page");
 const productsSearchForm = document.querySelector("#products-search-form");
 const productsQuery = document.querySelector("#products-query");
+const productsSearchTarget = document.querySelector("#products-search-target");
+const productsIncludeExport = document.querySelector("#products-include-export");
 const productsSyncButton = document.querySelector("#products-sync");
+const productsRefreshButton = document.querySelector("#products-refresh");
 const productsStatus = document.querySelector("#products-status");
 const productsProgress = document.querySelector("#products-progress");
 const productsBody = document.querySelector("#products-body");
@@ -316,7 +319,9 @@ productsSearchForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadProducts(1);
 });
+productsIncludeExport.addEventListener("change", () => loadProducts(1));
 productsSyncButton.addEventListener("click", () => productsSyncing ? stopProductSync() : syncProducts());
+productsRefreshButton.addEventListener("click", refreshProducts);
 productsPrevButton.addEventListener("click", () => loadProducts(productsCurrentPage - 1));
 productsNextButton.addEventListener("click", () => loadProducts(productsCurrentPage + 1));
 productsBody.addEventListener("click", (event) => {
@@ -589,7 +594,7 @@ async function loadProducts(page = 1) {
   productsStatus.textContent = "저장된 건강기능식품 제품 자료를 불러오는 중입니다.";
   productsPrevButton.disabled = true;
   productsNextButton.disabled = true;
-  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim() });
+  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked) });
   try {
     const response = await fetch(`/api/health-products?${params}`);
     const data = await response.json();
@@ -606,8 +611,9 @@ async function loadProducts(page = 1) {
       </tr>`).join("") : '<tr><td colspan="9">검색 결과가 없습니다.</td></tr>';
     const coverage = data.indexedTotal ? (data.detailTotal / data.indexedTotal * 100).toFixed(1) : "0.0";
     productsStatus.textContent = data.complete
-      ? `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 상세 원료 수집 완료`
-      : `주원료 검색 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 중 상세 원료 ${data.detailTotal.toLocaleString("ko-KR")}건 (${coverage}%) 수집 · 미수집 제품은 품목유형 기준 결과입니다.`;
+      ? `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 상세 원료 수집 완료`
+      : `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 중 상세 원료 ${data.detailTotal.toLocaleString("ko-KR")}건 (${coverage}%) 수집${productsSearchTarget.value === "name" ? "" : " · 미수집 제품은 품목유형 기준 결과입니다."}`;
+    if (data.syncedAt) productsStatus.textContent += ` · 목록 갱신 ${new Date(data.syncedAt).toLocaleString("ko-KR")}`;
     productsProgress.value = data.indexedTotal ? data.detailTotal / data.indexedTotal * 100 : 0;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
@@ -620,8 +626,28 @@ async function loadProducts(page = 1) {
   }
 }
 
+async function refreshProducts() {
+  if (productsSyncing) return;
+  productsRefreshButton.disabled = true;
+  productsSyncButton.disabled = true;
+  productsStatus.textContent = "식품안전나라 제품 목록을 갱신하는 중입니다.";
+  try {
+    const response = await fetch("/api/health-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refreshList: true }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "제품 목록을 갱신하지 못했습니다.");
+    await loadProducts(1);
+    productsStatus.textContent += ` · 신규 ${data.added.toLocaleString("ko-KR")}건 · 원본 목록에서 제외 ${data.removed.toLocaleString("ko-KR")}건`;
+  } catch (error) {
+    productsStatus.textContent = error.message;
+  } finally {
+    productsRefreshButton.disabled = false;
+    productsSyncButton.disabled = false;
+  }
+}
+
 async function syncProducts() {
   productsSyncing = true;
+  productsRefreshButton.disabled = true;
   productsSyncButton.textContent = "수집 중지";
   let failures = 0;
   while (productsSyncing) {
@@ -656,6 +682,7 @@ async function syncProducts() {
 function stopProductSync() {
   productsSyncing = false;
   productsSyncButton.textContent = "전체 수집";
+  productsRefreshButton.disabled = false;
 }
 
 function showProductDetail(item) {

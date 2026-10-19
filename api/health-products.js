@@ -2,7 +2,7 @@ import {
   getHealthProductDetailChunk, getHealthProductSearchChunk, getHealthProductsIndex, saveHealthProductDetailChunk, saveHealthProductSearchChunk, saveHealthProductsIndex
 } from "../src/storage.js";
 import {
-  buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProductSearchRows, HEALTH_PRODUCT_CHUNK_SIZE, mergeHealthProductSearchRows, pageHealthProducts
+  buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProducts, HEALTH_PRODUCT_CHUNK_SIZE, mergeHealthProductSearchRows, pageHealthProducts, refreshHealthProductIndex
 } from "../src/healthProducts.js";
 
 export const config = { maxDuration: 60 };
@@ -16,13 +16,15 @@ export default async function handler(request, response) {
       const query = String(request.query.q || "").trim();
       let searchRows = [];
       let matchedIds = null;
-      if (query) {
+      const target = request.query.target || "ingredients";
+      if (query && target !== "name") {
         const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
         const detailSearchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number)))).flat();
         searchRows = mergeHealthProductSearchRows(index.items, detailSearchRows);
-        matchedIds = filterHealthProductSearchRows(searchRows, query);
+        matchedIds = filterHealthProducts(index.items, detailSearchRows, query, target);
       }
-      const params = { page: request.query.page, matchedIds };
+      if (query && target === "name") matchedIds = filterHealthProducts(index.items, [], query, target);
+      const params = { page: request.query.page, matchedIds, includeExport: request.query.includeExport !== "false" };
       const first = pageHealthProducts(index, [], params);
       const chunkNumbers = [...new Set(first.items.filter((item) => item.index < index.detailTotal).map((item) => Math.floor(item.index / HEALTH_PRODUCT_CHUNK_SIZE)))];
       const ingredientMap = new Map(searchRows.map((item) => [item.id, item.ingredients]));
@@ -33,11 +35,18 @@ export default async function handler(request, response) {
 
     if (request.method === "POST") {
       let index = request.body?.reset ? null : await getHealthProductsIndex();
+      if (index && request.body?.refreshList) {
+        const previousTotal = index.total;
+        index = refreshHealthProductIndex(index, await fetchHealthProductIndex());
+        const storage = await saveHealthProductsIndex(index);
+        if (!storage.saved) return response.status(503).json({ error: "갱신된 제품 목록을 저장하지 못했습니다." });
+        return response.status(200).json({ ...status(index), added: index.total - previousTotal, removed: index.total - index.activeTotal });
+      }
       if (!index) {
         index = await fetchHealthProductIndex();
         const storage = await saveHealthProductsIndex(index);
         if (!storage.saved) return response.status(503).json({ error: "Blob 저장소가 연결되어야 제품 자료를 저장할 수 있습니다.", storage });
-        return response.status(200).json(status(index));
+        return response.status(200).json({ ...status(index), added: index.total, removed: 0 });
       }
       const indexedThrough = Number(index.searchIndexedThrough || 0);
       const detailTotal = Number(index.detailTotal || 0);
@@ -90,11 +99,14 @@ function status(index) {
   const detailTotal = Number(index.detailTotal || 0);
   const searchIndexedThrough = Number(index.searchIndexedThrough || 0);
   const detailComplete = detailTotal >= Number(index.total || 0);
+  const activeItems = index.items.filter((item) => item.active !== false);
+  const activeDetailed = activeItems.filter((item) => item.index < detailTotal).length;
+  const activeIndexed = activeItems.filter((item) => item.index < searchIndexedThrough).length;
   return {
-    total: index.total || 0, detailTotal, searchIndexedThrough, detailComplete,
+    total: activeItems.length, detailTotal: activeDetailed, searchIndexedThrough: activeIndexed, detailComplete,
     complete: detailComplete && searchIndexedThrough >= detailTotal,
-    progress: index.total ? Math.floor(Math.min(detailTotal, searchIndexedThrough) / index.total * 1000) / 10 : 0,
-    searchProgress: detailTotal ? Math.floor(searchIndexedThrough / detailTotal * 1000) / 10 : 100,
+    progress: activeItems.length ? Math.floor(Math.min(activeDetailed, activeIndexed) / activeItems.length * 1000) / 10 : 0,
+    searchProgress: activeDetailed ? Math.floor(activeIndexed / activeDetailed * 1000) / 10 : 100,
     syncedAt: index.syncedAt || null, updatedAt: index.updatedAt || null
   };
 }
