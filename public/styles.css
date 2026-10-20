@@ -227,7 +227,7 @@ button:disabled {
 
 .product-search-controls {
   display: grid;
-  grid-template-columns: auto minmax(320px, 1fr) auto auto;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(140px, 1fr) auto auto;
   gap: 12px;
   align-items: end;
 }

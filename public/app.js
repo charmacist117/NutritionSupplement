@@ -78,6 +78,7 @@ const ingredientsNextButton = document.querySelector("#ingredients-next");
 const ingredientsPage = document.querySelector("#ingredients-page");
 const productsSearchForm = document.querySelector("#products-search-form");
 const productsQuery = document.querySelector("#products-query");
+const productsCompany = document.querySelector("#products-company");
 const productsSearchTarget = document.querySelector("#products-search-target");
 const productsIncludeExport = document.querySelector("#products-include-export");
 const productsStatus = document.querySelector("#products-status");
@@ -592,11 +593,11 @@ async function loadProducts(page = 1) {
   const controller = new AbortController();
   productsRequest = controller;
   productsStatus.textContent = "식품안전나라에서 최신 제품 목록을 조회하는 중입니다.";
-  productsBody.innerHTML = '<tr><td colspan="7">최신 제품 목록을 불러오는 중입니다.</td></tr>';
+  productsBody.innerHTML = '<tr><td colspan="8">최신 제품 목록을 불러오는 중입니다.</td></tr>';
   productRows.clear();
   productsPrevButton.disabled = true;
   productsNextButton.disabled = true;
-  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked) });
+  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), company: productsCompany.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked) });
   try {
     const response = await fetch(`/api/health-products?${params}`, { cache: "no-store", signal: controller.signal });
     const data = await response.json();
@@ -608,17 +609,46 @@ async function loadProducts(page = 1) {
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
         <td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.company)}</td>
-        <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
+        <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td class="product-ingredients" data-product-types="${escapeHtml(item.id)}">조회 중...</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td><button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button></td>
-      </tr>`).join("") : '<tr><td colspan="7">검색 결과가 없습니다.</td></tr>';
+      </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
     productsStatus.textContent = `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · ${data.searchBasis} 기준 · 조회 ${new Date(data.fetchedAt).toLocaleString("ko-KR")}`;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
+    if (data.items.length) {
+      // 목록 요청과 분리해 현재 페이지의 상세 유형을 서버리스 실행 시간 안에 조회한다.
+      productsStatus.textContent += " · 품목 총 유형 조회 중";
+      try {
+        const typeParams = new URLSearchParams({ ids: data.items.map((item) => item.id).join(",") });
+        const typeResponse = await fetch(`/api/health-products?${typeParams}`, { cache: "no-store", signal: controller.signal });
+        const types = await typeResponse.json();
+        if (!typeResponse.ok) throw new Error(types.error || "품목 총 유형을 불러오지 못했습니다.");
+        if (productsRequest !== controller) return;
+        const byId = new Map(types.items.map((item) => [item.id, item]));
+        let failures = 0;
+        for (const item of data.items) {
+          const type = byId.get(item.id);
+          const cell = productsBody.querySelector(`[data-product-types="${CSS.escape(item.id)}"]`);
+          const error = !type ? "제품의 유형 응답이 없습니다." : type.typeError;
+          cell.textContent = error ? "조회 실패" : type.allTypes || "원문 미기재";
+          cell.title = error || "";
+          if (error) failures++;
+        }
+        productsStatus.textContent = productsStatus.textContent.replace(" · 품목 총 유형 조회 중", failures ? ` · 품목 총 유형 ${failures}건 조회 실패 (상세 버튼으로 재확인)` : " · 품목 총 유형 확인 완료");
+      } catch (error) {
+        if (controller.signal.aborted || productsRequest !== controller) return;
+        for (const cell of productsBody.querySelectorAll("[data-product-types]")) {
+          cell.textContent = "조회 실패";
+          cell.title = error.message;
+        }
+        productsStatus.textContent = productsStatus.textContent.replace(" · 품목 총 유형 조회 중", " · 품목 총 유형 조회 실패 (상세 버튼으로 재확인)");
+      }
+    }
   } catch (error) {
     if (controller.signal.aborted || productsRequest !== controller) return;
     productsLoaded = false;
-    productsBody.innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
+    productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
     productsStatus.textContent = error.message;
     productsPage.textContent = "1 / 1";
   }
@@ -638,6 +668,11 @@ async function showProductDetail(item) {
     const detail = await response.json();
     if (!response.ok) throw new Error(detail.error || "상세정보를 불러오지 못했습니다.");
     if (productDetailRequest !== controller) return;
+    const typeCell = productsBody.querySelector(`[data-product-types="${CSS.escape(item.id)}"]`);
+    if (typeCell) {
+      typeCell.textContent = detail.allTypes || "원문 미기재";
+      typeCell.title = "";
+    }
     productDetailTables.innerHTML = detail.tables.map((table, index) => `
       <section class="product-detail-table">
         <h3>상세 표 ${index + 1}</h3>
