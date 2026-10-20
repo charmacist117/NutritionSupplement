@@ -39,6 +39,8 @@ await assert.rejects(collectProductTypeCatalog(async () => ({ total: 2, rows: [r
 await assert.rejects(collectProductTypeCatalog(async () => ({ total: 2, rows: [raw(1), raw(1)] })), /검증/);
 assert.throws(() => normalizeFoodsafetyProduct({ ...raw(1), RAWMTRL_NM: undefined }, now), /전체 유형/);
 assert.equal(normalizeFoodsafetyProduct({ ...raw(1), RAWMTRL_NM: null }, now).allTypes, "");
+assert.equal(normalizeFoodsafetyProduct({ ...raw(1), BSSH_NM: "성윤(F\\u0026G)" }, now).company, "성윤(F&G)");
+assert.equal(normalizeFoodsafetyProduct({ ...raw(1), RAWMTRL_NM: "마그네슘,\\n비타민 D" }, now).allTypes, "마그네슘,\n비타민 D");
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.FOODSAFETY_API_KEY;

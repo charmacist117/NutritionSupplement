@@ -1,5 +1,10 @@
 export const FOODSAFETY_API_SOURCE_URL = "https://www.foodsafetykorea.go.kr/api/openApiInfo.do?svc_no=I0030";
 
+function apiText(value) {
+  return String(value || "").replace(/\\u([0-9a-f]{4})/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/\\r\\n|\\n|\\r/g, "\n").trim();
+}
+
 export async function fetchFoodsafetyApiPage(start, end, reportNumber = "") {
   const key = String(process.env.FOODSAFETY_API_KEY || "").trim();
   if (!/^[a-zA-Z0-9]{10,128}$/.test(key) || key === "sample") {
@@ -34,8 +39,8 @@ export function normalizeFoodsafetyProduct(row, fetchedAt) {
     throw new Error("공식 API 제품·전체 유형 항목 검증에 실패했습니다.");
   }
   return { id: row.PRDLST_REPORT_NO, reportNumber: row.PRDLST_REPORT_NO, detailLookup: "report",
-    name: row.PRDLST_NM, company: row.BSSH_NM, type: row.PRDLST_CDNM || "", allTypes: row.RAWMTRL_NM || "",
-    shelfLife: row.POG_DAYCNT || "", domesticExport: "원문 미제공", categoryCode: "", typesFetchedAt: fetchedAt,
+    name: apiText(row.PRDLST_NM), company: apiText(row.BSSH_NM), type: apiText(row.PRDLST_CDNM), allTypes: apiText(row.RAWMTRL_NM),
+    shelfLife: apiText(row.POG_DAYCNT), domesticExport: "원문 미제공", categoryCode: "", typesFetchedAt: fetchedAt,
     productionEnded: row.PRODUCTION === "예", sourceUpdatedAt: row.LAST_UPDT_DTM || "" };
 }
 
@@ -54,5 +59,5 @@ export async function fetchFoodsafetyProductDetail(reportNumber) {
     ["기준규격", "STDR_STND"], ["기능성 원재료", "INDIV_RAWMTRL_NM"], ["기타 원재료", "ETC_RAWMTRL_NM"],
     ["캡슐 원재료", "CAP_RAWMTRL_NM"], ["보관방법", "CSTDY_MTHD"], ["포장방법", "FRMLC_MTHD"], ["포장재질", "FRMLC_MTRQLT"]];
   return { allTypes: item.allTypes, fetchedAt, sourceUrl: FOODSAFETY_API_SOURCE_URL,
-    tables: [{ number: 1, rows: fields.map(([name, key]) => [name, String(row[key] || "").replace(/\\r\\n|\\n|\\r/g, "\n")]) }] };
+    tables: [{ number: 1, rows: fields.map(([name, key]) => [name, apiText(row[key])]) }] };
 }
