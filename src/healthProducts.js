@@ -180,6 +180,12 @@ export function filterHealthProductSearchRows(rows, query) {
   return new Set((rows || []).filter((item) => evaluate(expression, searchKey(item.ingredients))).map((item) => item.id));
 }
 
+export function filterHealthProductTypes(items, query, { includeName = false } = {}) {
+  const rows = items.filter((item) => typeof item.allTypes === "string" && !item.typeError && !item.detailError)
+    .map((item) => ({ id: item.id, ingredients: includeName ? `${item.name || ""} | ${item.allTypes}` : item.allTypes }));
+  return filterHealthProductSearchRows(rows, query);
+}
+
 export function parseDetailTables(html) {
   return [...String(html || "").matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)].map((table, tableIndex) => ({
     number: tableIndex + 1,
@@ -282,7 +288,9 @@ async function fetchProductDetail(session, item) {
   const response = await fetch(url, { headers: { Cookie: session.cookie, Referer: HEALTH_PRODUCTS_SOURCE_URL }, signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`상세정보 응답 오류 (${response.status})`);
   const tables = parseDetailTables(await response.text());
-  if (!tables.length) throw new Error("상세 표를 찾지 못했습니다.");
+  if (!tables.some((table) => table.rows.some((row) => row.some((cell) => cell.replace(/\s+/g, "") === "제품명")))) {
+    throw new Error("제품 상세 표를 찾지 못했습니다.");
+  }
   return { fetchedAt: new Date().toISOString(), sourceUrl: url, tables, ingredientText: ingredientText(tables), ...detailFields(tables) };
 }
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -23,7 +23,7 @@ globalThis.fetch = async (url, options = {}) => {
     const id = new URL(url).searchParams.get("prdlstReportLedgNo");
     if (id === "3") return new Response("upstream unavailable", { status: 503 });
     const typeRow = id === "2" ? "" : "<table><tr><th>유형</th><td>마그네슘,<br>비타민 D</td></tr></table>";
-    return new Response(`${typeRow}<table><tr><th>성분 및 원료</th></tr><tr><td>원료 ${revision}</td></tr></table>`);
+    return new Response(`<table><tr><th>제품명</th><td>테스트</td></tr></table>${typeRow}<table><tr><th>성분 및 원료</th></tr><tr><td>원료 ${revision}</td></tr></table>`);
   }
   listRequests++;
   assert.equal(options.method, "POST");
@@ -41,6 +41,17 @@ globalThis.fetch = async (url, options = {}) => {
 };
 
 try {
+  const fullTypes = [
+    { id: "1", name: "더파르마", type: "마그네슘", allTypes: "마그네슘, 비타민 D" },
+    { id: "2", name: "단일 비타민", type: "비타민 D", allTypes: "비타민 D" },
+    { id: "3", name: "복합제", type: "비타민 C", allTypes: "비타민 C, 마그네슘, 비타민 D" },
+    { id: "4", name: "미확인", type: "아연" },
+    { id: "5", name: "조회 실패", type: "비타민 D", allTypes: "", typeError: "조회 실패" }
+  ];
+  assert.deepEqual([...filterHealthProductTypes(fullTypes, "마그네슘 AND 비타민D")], ["1", "3"]);
+  assert.deepEqual([...filterHealthProductTypes(fullTypes, "비타민D AND NOT 마그네슘")], ["2"]);
+  assert.deepEqual([...filterHealthProductTypes(fullTypes, "NOT 마그네슘")], ["2"]);
+  assert.deepEqual([...filterHealthProductTypes(fullTypes, "더파르마 AND 비타민D", { includeName: true })], ["1"]);
   const page = await searchHealthProductsLive({ page: 2 });
   assert.equal(page.total, 21);
   assert.equal(page.items.length, 1);

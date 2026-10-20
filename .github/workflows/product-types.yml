@@ -1,0 +1,50 @@
+name: 건강기능식품 전체 유형 갱신
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 19 * * *'
+permissions:
+  contents: write
+concurrency:
+  group: product-type-catalog
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/cache/restore@v4
+        with:
+          path: 수집자료/진행.jsonl
+          key: product-types-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: product-types-
+      - name: 이전 완성본 내려받기
+        shell: bash
+        run: |
+          mkdir -p 수집자료
+          if gh release view product-type-catalog --json assets > 수집자료/릴리스.json; then
+            ASSET=$(node --input-type=module -e 'import fs from "node:fs";const a=JSON.parse(fs.readFileSync("수집자료/릴리스.json")).assets.filter(x=>/^catalog-\d+-\d+\.json\.gz$/.test(x.name)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));process.stdout.write(a[0]?.name||"")')
+            if [ -n "$ASSET" ]; then
+              gh release download product-type-catalog --pattern "$ASSET" --output 수집자료/이전.json.gz
+            fi
+          fi
+      - name: 전체 제품 상세 유형 수집 및 검증
+        run: node scripts/collectProductTypes.js
+      - name: 완성본 게시
+        shell: bash
+        run: |
+          if ! gh release view product-type-catalog > /dev/null 2>&1; then
+            gh release create product-type-catalog --latest=false --title '건강기능식품 전체 유형 자료' --notes '식품안전나라 제품 상세표의 전체 유형. 매일 자동 갱신하며 검증된 완성본만 게시합니다.'
+          fi
+          gh release upload product-type-catalog "수집자료/catalog-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json.gz"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: 수집자료/진행.jsonl
+          key: product-types-${{ github.run_id }}-${{ github.run_attempt }}

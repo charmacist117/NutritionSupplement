@@ -3,6 +3,7 @@ node_modules/
 data/monthly/
 data/ingredients/
 data/health-products/
+수집자료/
 *.log
 .DS_Store
 Thumbs.db
