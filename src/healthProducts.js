@@ -57,14 +57,14 @@ export async function fetchHealthProductTypesLive(ids) {
   return { items: details.map((item) => ({ id: item.id, allTypes: item.allTypes || "", typeError: item.detailError || "" })) };
 }
 
-export async function fetchHealthProductIndex({ keywords = null, bulk = false } = {}) {
+export async function fetchHealthProductIndex({ keywords = null } = {}) {
   const session = await openSession();
   const included = [];
   let excluded = [];
   if (keywords?.length) {
-    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword, bulk));
+    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword));
   } else {
-    const lists = await Promise.allSettled([fetchProductList(session, "I", " ", bulk), fetchProductList(session, "E", " ", bulk)]);
+    const lists = await Promise.allSettled([fetchProductList(session, "I"), fetchProductList(session, "E")]);
     const failed = lists.find((result) => result.status === "rejected");
     if (failed) throw failed.reason;
     included.push(...lists[0].value);
@@ -88,8 +88,9 @@ export async function fetchHealthProductDetails(items, { concurrency = 10 } = {}
   const session = await openSession();
   const results = new Array(items.length);
   let cursor = 0;
+  let restricted = false;
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
+    while (cursor < items.length && !restricted) {
       const index = cursor++;
       const item = items[index];
       if (item.active === false) {
@@ -99,6 +100,7 @@ export async function fetchHealthProductDetails(items, { concurrency = 10 } = {}
       try {
         results[index] = { ...item, ...await fetchProductDetail(session, item) };
       } catch (error) {
+        if (error.code === "UPSTREAM_RESTRICTED") { restricted = true; throw error; }
         results[index] = { ...item, detailError: error.message || "상세정보 조회 실패", tables: [] };
       }
     }
@@ -223,6 +225,7 @@ async function openSession() {
   const response = await fetch(HEALTH_PRODUCTS_SOURCE_URL, { signal: AbortSignal.timeout(20000) });
   if (!response.ok) throw new Error(`식품안전나라 초기 접속 오류 (${response.status})`);
   const html = await response.text();
+  assertSourceAvailable(html);
   const callPage = html.match(/name=["']callPage["'][^>]*value=["']([^"']+)/i)?.[1]
     || html.match(/value=["']([^"']+)["'][^>]*name=["']callPage["']/i)?.[1];
   if (!callPage) throw new Error("식품안전나라 검색 세션을 확인하지 못했습니다.");
@@ -232,18 +235,17 @@ async function openSession() {
   return { callPage, cookie: cookies.join("; ") };
 }
 
-async function fetchProductList(session, condition, keyword = " ", bulk = false) {
-  const pageSize = bulk ? 500 : 2000;
-  const timeoutMs = bulk ? 120000 : 45000;
+async function fetchProductList(session, condition, keyword = " ") {
+  const pageSize = 2000;
   const body = new URLSearchParams({
     s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
     s_prdlst_cd: "all", s_bsn_nm: "", s_prd_nm: "", s_prdlst_report_no: "",
     s_opt1: condition, s_keyword1: keyword, s_opt2: "Y", s_opt3: "0", s_keyword2: "",
-    s_order_by: bulk ? "reg_dt" : "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
+    s_order_by: "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });
-  const count = await requestProductList(session, "searchPrdListCnt_1", body, timeoutMs);
+  const count = await requestProductList(session, "searchPrdListCnt_1", body);
   if (count.totCnt === null || count.totCnt === undefined || count.totCnt === "" || !Number.isSafeInteger(Number(count.totCnt)) || Number(count.totCnt) < 0) {
     throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
   }
@@ -252,19 +254,18 @@ async function fetchProductList(session, condition, keyword = " ", bulk = false)
   const pageCount = Math.ceil(expected / pageSize);
   let cursor = 0;
   let failure;
-  await Promise.all(Array.from({ length: Math.min(bulk ? 1 : 3, pageCount) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(3, pageCount) }, async () => {
     while (cursor < pageCount && !failure) {
       const page = cursor++;
       const params = new URLSearchParams(body);
       params.set("s_page_num", String(page + 1));
       try {
-        const payload = await requestProductList(session, "searchPrdList_1", params, timeoutMs);
+        const payload = await requestProductList(session, "searchPrdList_1", params);
         if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
         if (payload.prdList.length !== Math.min(pageSize, expected - page * pageSize)) {
           throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page + 1}페이지). 다시 검색해주세요.`);
         }
         pages[page] = payload.prdList;
-        if (bulk) console.log(`목록 ${condition}: ${page + 1}/${pageCount}페이지 확인`);
       } catch (error) { failure ||= error; }
     }
   }));
@@ -278,12 +279,12 @@ async function fetchProductList(session, condition, keyword = " ", bulk = false)
   return rows;
 }
 
-async function requestProductList(session, endpoint, body, timeoutMs) {
+async function requestProductList(session, endpoint, body) {
   const response = await fetch(`${ORIGIN}/ajax/portal/specialinfo/${endpoint}.do`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", Cookie: session.cookie, Referer: HEALTH_PRODUCTS_SOURCE_URL, "X-Requested-With": "XMLHttpRequest" },
     body,
-    signal: AbortSignal.timeout(timeoutMs)
+    signal: AbortSignal.timeout(45000)
   }).catch((error) => {
     console.error(`원본 요청 실패: ${endpoint}, 조건 ${body.get("s_opt1")}, 페이지 ${body.get("s_page_num")}: ${error.message}`);
     throw error;
@@ -298,11 +299,20 @@ async function fetchProductDetail(session, item) {
   const url = `${ORIGIN}/iframe/specialinfo/prdInfoDetail.do?prdlstReportLedgNo=${encodeURIComponent(item.id)}&from=searchCompany&callPage=${encodeURIComponent(session.callPage)}`;
   const response = await fetch(url, { headers: { Cookie: session.cookie, Referer: HEALTH_PRODUCTS_SOURCE_URL }, signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`상세정보 응답 오류 (${response.status})`);
-  const tables = parseDetailTables(await response.text());
+  const html = await response.text();
+  assertSourceAvailable(html);
+  const tables = parseDetailTables(html);
   if (!tables.some((table) => table.rows.some((row) => row.some((cell) => cell.replace(/\s+/g, "") === "제품명")))) {
     throw new Error("제품 상세 표를 찾지 못했습니다.");
   }
   return { fetchedAt: new Date().toISOString(), sourceUrl: url, tables, ingredientText: ingredientText(tables), ...detailFields(tables) };
+}
+
+function assertSourceAvailable(html) {
+  if (/서비스\s*이용이\s*제한/.test(html)) {
+    const error = new Error("식품안전나라에서 접속을 제한하여 조회를 중단했습니다. 원본 사이트의 제한 안내를 확인해주세요.");
+    error.code = "UPSTREAM_RESTRICTED"; error.status = 503; throw error;
+  }
 }
 
 function normalizeListItem(row) {

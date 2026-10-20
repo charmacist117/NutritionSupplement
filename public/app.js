@@ -604,7 +604,7 @@ async function loadProducts(page = 1) {
     productRows = new Map(data.items.map((item) => [item.id, item]));
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
-        <td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.company)}</td>
+        <td><strong>${escapeHtml(item.name)}</strong>${item.productionEnded ? " <small>생산종료</small>" : ""}</td><td>${escapeHtml(item.company)}</td>
         <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td class="product-ingredients" data-product-types="${escapeHtml(item.id)}">${typeof item.allTypes === "string" ? escapeHtml(item.allTypes || "원문 미기재") : "조회 중..."}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td><button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button></td>
       </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
@@ -612,7 +612,7 @@ async function loadProducts(page = 1) {
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
-    if (data.items.length) {
+    if (data.items.length && !data.catalogBuiltAt) {
       // 목록 요청과 분리해 현재 페이지의 상세 유형을 서버리스 실행 시간 안에 조회한다.
       productsStatus.textContent += " · 품목 총 유형 조회 중";
       try {
@@ -660,7 +660,8 @@ async function showProductDetail(item) {
   productDetailTables.textContent = "식품안전나라에서 상세 원료를 조회하는 중입니다.";
   if (!productDetailDialog.open) productDetailDialog.showModal();
   try {
-    const response = await fetch(`/api/health-products?id=${encodeURIComponent(item.id)}`, { cache: "no-store", signal: controller.signal });
+    const detailQuery = item.detailLookup === "report" ? `report=${encodeURIComponent(item.reportNumber)}` : `id=${encodeURIComponent(item.id)}`;
+    const response = await fetch(`/api/health-products?${detailQuery}`, { cache: "no-store", signal: controller.signal });
     const detail = await response.json();
     if (!response.ok) throw new Error(detail.error || "상세정보를 불러오지 못했습니다.");
     if (productDetailRequest !== controller) return;

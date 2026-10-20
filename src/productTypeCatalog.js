@@ -40,7 +40,7 @@ export async function loadProductTypeCatalog() {
       throw new Error("완성된 전체 유형 자료가 없습니다.");
     } catch (error) {
       if (cachedCatalog) { checkedAt = Date.now(); return cachedCatalog; }
-      const unavailable = new Error("전체 유형 검색 자료를 구축 중이거나 불러올 수 없습니다. 잠시 후 다시 검색해주세요.");
+      const unavailable = new Error("품목 총 유형 검색 자료가 아직 준비되지 않았거나 불러올 수 없습니다. 제품명 검색을 이용해주세요.");
       unavailable.status = 503;
       throw unavailable;
     }

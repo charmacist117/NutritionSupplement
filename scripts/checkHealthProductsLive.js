@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductIndex, fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -11,16 +11,22 @@ let testRows = null;
 let timeoutSource = false;
 let sourceRequests = [];
 let failedListPage = null;
+let restrictedSource = false;
+let restrictedDetail = false;
+let detailRequests = 0;
 const raw = (id, name, type) => ({ PRDLST_REPORT_LEDG_NO: String(id), PRDLST_NM: name, PRDLST_CD_NM: type, BSSH_NM: id % 2 ? "엠에스바이오텍(주)" : "엔피케이(주)", PREFIX_PRDLST_CD: "E", FOOD_HF_LS_CL_CD: id === 1 ? "001" : "002" });
 globalThis.fetch = async (url, options = {}) => {
   assert.equal(new URL(url).hostname, "www.foodsafetykorea.go.kr");
   if (url.endsWith("searchInfoProduct.do")) {
+    if (restrictedSource) return new Response("귀하의 서비스 이용이 제한되었습니다.");
     if (timeoutSource) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     sessions++;
     return new Response('<input name="callPage" value="123">', { headers: { "set-cookie": "session=test; Path=/" } });
   }
   assert.match(options.headers.Cookie, /callPage=123/);
   if (url.includes("prdInfoDetail.do")) {
+    detailRequests++;
+    if (restrictedDetail) return new Response("서비스 이용이 제한되었습니다.");
     const id = new URL(url).searchParams.get("prdlstReportLedgNo");
     if (id === "3") return new Response("upstream unavailable", { status: 503 });
     if (id === "4") return new Response("<table><tr><td>원본 오류 안내</td></tr></table>");
@@ -130,11 +136,6 @@ try {
   assert.equal(lastPage.total, 4501);
   assert.equal(lastPage.items.length, 1);
   assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => request.page).sort(), ["1", "2", "3"]);
-  testRows = testRows.slice(0, 1201);
-  sourceRequests = [];
-  assert.equal((await fetchHealthProductIndex({ bulk: true })).total, 1201);
-  assert.ok(sourceRequests.every((request) => request.order === "reg_dt"));
-  assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => [request.page, request.pageSize]).sort(), [["1", "500"], ["2", "500"], ["3", "500"]]);
   testRows = Array.from({ length: 10001 }, (_, i) => raw(i + 1, `더파르마 ${i}`, "마그네슘"));
   sourceRequests = [];
   failedListPage = "1";
@@ -142,6 +143,16 @@ try {
   assert.ok(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).every((request) => Number(request.page) <= 3));
   failedListPage = null;
   testRows = null;
+  restrictedSource = true;
+  const listsBeforeRestriction = listRequests;
+  await assert.rejects(fetchHealthProductTypesLive(["1", "2", "3"]), { code: "UPSTREAM_RESTRICTED", status: 503 });
+  assert.equal(listRequests, listsBeforeRestriction);
+  restrictedSource = false;
+  restrictedDetail = true;
+  const detailsBeforeRestriction = detailRequests;
+  await assert.rejects(fetchHealthProductTypesLive(Array.from({ length: 20 }, (_, i) => String(i + 1))), { code: "UPSTREAM_RESTRICTED" });
+  assert.ok(detailRequests - detailsBeforeRestriction <= 5);
+  restrictedDetail = false;
   timeoutSource = true;
   await handler({ method: "GET", query: {} }, response);
   assert.equal(response.statusCode, 504);

@@ -11,6 +11,7 @@ import { createComparisonReportPdf, createExecutiveReportPdf } from "./executive
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
 import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "./healthProducts.js";
 import { searchHealthProducts } from "./productTypeCatalog.js";
+import { fetchFoodsafetyProductDetail } from "./foodsafetyApi.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -115,7 +116,8 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/health-products") {
       response.setHeader("Cache-Control", "no-store");
       if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed" });
-      const result = url.searchParams.has("id")
+      const result = url.searchParams.has("report") ? await fetchFoodsafetyProductDetail(url.searchParams.get("report"))
+        : url.searchParams.has("id")
         ? await fetchHealthProductDetailLive(url.searchParams.get("id"))
         : url.searchParams.has("ids") ? await fetchHealthProductTypesLive(url.searchParams.get("ids").split(","))
         : await searchHealthProducts({ page: url.searchParams.get("page"), query: String(url.searchParams.get("q") || "").trim(),

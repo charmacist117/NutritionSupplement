@@ -1,5 +1,6 @@
 import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "../src/healthProducts.js";
 import { searchHealthProducts } from "../src/productTypeCatalog.js";
+import { fetchFoodsafetyProductDetail } from "../src/foodsafetyApi.js";
 
 export const config = { maxDuration: 60 };
 
@@ -7,7 +8,8 @@ export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
   if (request.method !== "GET") return response.status(405).json({ error: "Method not allowed" });
   try {
-    const result = request.query.id !== undefined
+    const result = request.query.report !== undefined ? await fetchFoodsafetyProductDetail(request.query.report)
+      : request.query.id !== undefined
       ? await fetchHealthProductDetailLive(request.query.id)
       : request.query.ids !== undefined ? await fetchHealthProductTypesLive(String(request.query.ids).split(","))
       : await searchHealthProducts({ page: request.query.page, query: String(request.query.q || "").trim(),

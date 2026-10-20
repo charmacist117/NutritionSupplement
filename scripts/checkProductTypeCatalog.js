@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { collectProductTypes } from "./collectProductTypes.js";
+import { collectProductTypeCatalog } from "./collectProductTypes.js";
+import { fetchFoodsafetyApiPage, normalizeFoodsafetyProduct, fetchFoodsafetyProductDetail } from "../src/foodsafetyApi.js";
 import { validateProductTypeCatalog, searchProductTypeCatalog, searchHealthProducts, loadProductTypeCatalog } from "../src/productTypeCatalog.js";
 import { gzipSync } from "node:zlib";
 import handler from "../api/health-products.js";
@@ -22,21 +23,45 @@ assert.equal(searchProductTypeCatalog(catalog, { query: "NOT 마그네슘", incl
 assert.equal(searchProductTypeCatalog(catalog, { query: "비타민D", company: "코스맥스 엔비티" }).total, 2);
 assert.equal(searchProductTypeCatalog(catalog, { query: "더파르마 AND 비타민D", target: "all" }).total, 1);
 assert.throws(() => searchProductTypeCatalog(catalog, { query: "AND" }), { status: 400 });
-let attempts = 0;
-const saved = [];
-const rebuilt = await collectProductTypes(items, [{ ...items[0], name: "이전 제품명" }, { ...items[1], typesFetchedAt: "2000-01-01" }],
-  async (batch) => saved.push(...batch), async (pending) => {
-    attempts++;
-    assert.ok(pending.every((item) => item.id !== "1"));
-    return pending.map((item) => attempts === 1 && item.id === "3" ? { ...item, detailError: "timeout" } : { ...item, fetchedAt: now });
-  });
-assert.equal(attempts, 2);
-assert.equal(rebuilt.length, 3);
-assert.equal(rebuilt[0].name, items[0].name);
-assert.equal(saved.length, 2);
-await assert.rejects(collectProductTypes(items, [], async () => {}, async (pending) => pending.map((item) => ({ ...item, detailError: "failed" }))), /3개 제품/);
+const raw = (id) => ({ PRDLST_REPORT_NO: String(id), PRDLST_NM: `제품 ${id}`, BSSH_NM: "코스맥스엔비티(주)",
+  PRDLST_CDNM: "마그네슘", RAWMTRL_NM: "마그네슘, 비타민 D" });
+const calls = [];
+const rebuilt = await collectProductTypeCatalog(async (start, end) => {
+  calls.push([start, end]);
+  return { total: 1001, rows: Array.from({ length: Math.min(end, 1001) - start + 1 }, (_, i) => raw(start + i)) };
+}, async () => {});
+assert.deepEqual(calls, [[1, 1000], [1001, 1001]]);
+assert.equal(rebuilt.total, 1001);
+assert.equal(rebuilt.items[0].detailLookup, "report");
+assert.equal(rebuilt.items[0].allTypes, "마그네슘, 비타민 D");
+await assert.rejects(collectProductTypeCatalog(async () => ({ total: 0, rows: [] })), /비어/);
+await assert.rejects(collectProductTypeCatalog(async () => ({ total: 2, rows: [raw(1)] })), /누락/);
+await assert.rejects(collectProductTypeCatalog(async () => ({ total: 2, rows: [raw(1), raw(1)] })), /검증/);
+assert.throws(() => normalizeFoodsafetyProduct({ ...raw(1), RAWMTRL_NM: undefined }, now), /전체 유형/);
+assert.equal(normalizeFoodsafetyProduct({ ...raw(1), RAWMTRL_NM: null }, now).allTypes, "");
 
 const originalFetch = globalThis.fetch;
+const originalKey = process.env.FOODSAFETY_API_KEY;
+delete process.env.FOODSAFETY_API_KEY;
+let apiCalls = 0;
+globalThis.fetch = async () => { apiCalls++; throw new Error("인증키 없이 요청하면 안 됨"); };
+await assert.rejects(fetchFoodsafetyApiPage(1, 1000), { status: 503 });
+await assert.rejects(fetchFoodsafetyProductDetail("bad"), { status: 400 });
+assert.equal(apiCalls, 0);
+process.env.FOODSAFETY_API_KEY = "unitTestKey12345";
+globalThis.fetch = async (url) => {
+  assert.equal(new URL(url).hostname, "openapi.foodsafetykorea.go.kr");
+  return Response.json({ I0030: { total_count: "1", RESULT: { CODE: "INFO-000" }, row: [raw(1)] } });
+};
+assert.equal((await fetchFoodsafetyApiPage(1, 1000)).total, 1);
+assert.equal((await fetchFoodsafetyProductDetail("1")).allTypes, "마그네슘, 비타민 D");
+const apiResponse = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; return this; } };
+await handler({ method: "GET", query: { report: "1" } }, apiResponse);
+assert.equal(apiResponse.statusCode, 200);
+assert.deepEqual(apiResponse.data.tables[0].rows.find((row) => row[0] === "유형"), ["유형", "마그네슘, 비타민 D"]);
+globalThis.fetch = async () => Response.json({ RESULT: { CODE: "INFO-100", MSG: "인증키 오류" } });
+await assert.rejects(fetchFoodsafetyApiPage(1, 1000), /INFO-100/);
+if (originalKey === undefined) delete process.env.FOODSAFETY_API_KEY; else process.env.FOODSAFETY_API_KEY = originalKey;
 let requests = 0;
 let unavailable = true;
 globalThis.fetch = async (url) => {
@@ -64,4 +89,4 @@ try {
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.data.items.map((item) => item.id), ["1", "3"]);
 } finally { globalThis.fetch = originalFetch; }
-console.log("full product type catalog and resumable collection checks ok");
+console.log("full product type catalog and official API collection checks ok");
