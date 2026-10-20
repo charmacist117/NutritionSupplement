@@ -226,6 +226,7 @@ async function serveStatic(request, response) {
 }
 
 function handleError(response, error) {
+  if (error.name === "TimeoutError") return sendJson(response, 504, { error: "원본 사이트의 응답이 지연되었습니다. 잠시 후 다시 검색해주세요." });
   if (error instanceof NaverShoppingInsightError) {
     return sendJson(response, error.status, {
       error: error.message,

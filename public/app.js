@@ -179,7 +179,6 @@ let executiveBaselineKeys = new Set();
 let executiveCurrentKeys = new Set();
 let ingredientsLoaded = false;
 let ingredientsCurrentPage = 1;
-let productsLoaded = false;
 let productsCurrentPage = 1;
 let productsRequest = null;
 let productDetailRequest = null;
@@ -318,7 +317,6 @@ productsSearchForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadProducts(1);
 });
-productsIncludeExport.addEventListener("change", () => loadProducts(1));
 productsPrevButton.addEventListener("click", () => loadProducts(productsCurrentPage - 1));
 productsNextButton.addEventListener("click", () => loadProducts(productsCurrentPage + 1));
 productsBody.addEventListener("click", (event) => {
@@ -554,7 +552,6 @@ async function setActiveTab(tab) {
   if (tab === "category-status") await renderCategoryStatusSheet();
   if (tab === "comparison") await renderComparisonSheet();
   if (tab === "ingredients" && !ingredientsLoaded) await loadIngredients(1);
-  if (tab === "products" && !productsLoaded) await loadProducts(1);
   if (tab === "settings") await loadApiSettings();
 }
 
@@ -600,10 +597,9 @@ async function loadProducts(page = 1) {
   const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), company: productsCompany.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked) });
   try {
     const response = await fetch(`/api/health-products?${params}`, { cache: "no-store", signal: controller.signal });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "제품 자료를 불러오지 못했습니다.");
+    const data = await response.json().catch(() => ({ error: "조회 응답을 받지 못했습니다. 잠시 후 다시 검색해주세요." }));
+    if (!response.ok || !Array.isArray(data.items)) throw new Error(data.error || "제품 자료를 불러오지 못했습니다.");
     if (productsRequest !== controller) return;
-    productsLoaded = true;
     productsCurrentPage = data.page;
     productRows = new Map(data.items.map((item) => [item.id, item]));
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
@@ -612,7 +608,7 @@ async function loadProducts(page = 1) {
         <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td class="product-ingredients" data-product-types="${escapeHtml(item.id)}">조회 중...</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td><button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button></td>
       </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
-    productsStatus.textContent = `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · 전체 ${data.indexedTotal.toLocaleString("ko-KR")}건 · ${data.searchBasis} 기준 · 조회 ${new Date(data.fetchedAt).toLocaleString("ko-KR")}`;
+    productsStatus.textContent = `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · ${data.searchBasis} 기준 · 조회 ${new Date(data.fetchedAt).toLocaleString("ko-KR")}`;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
@@ -647,7 +643,6 @@ async function loadProducts(page = 1) {
     }
   } catch (error) {
     if (controller.signal.aborted || productsRequest !== controller) return;
-    productsLoaded = false;
     productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
     productsStatus.textContent = error.message;
     productsPage.textContent = "1 / 1";

@@ -13,6 +13,7 @@ export default async function handler(request, response) {
         target: request.query.target || "name", company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false" });
     return response.status(200).json(result);
   } catch (error) {
+    if (error.name === "TimeoutError") return response.status(504).json({ error: "원본 사이트의 응답이 지연되었습니다. 잠시 후 다시 검색해주세요." });
     return response.status(error.status || 502).json({ error: error.message || "식품안전나라 조회에 실패했습니다." });
   }
 }

@@ -12,8 +12,10 @@ export async function searchHealthProductsLive({ page = 1, query = "", target = 
     error.status = 400;
     throw error;
   }
-  parseBooleanQuery(query);
-  const index = await fetchHealthProductIndex();
+  const expression = parseBooleanQuery(query);
+  const keywords = target === "name" ? sourceSearchKeywords(expression) : null;
+  const companyKeyword = String(company).match(/[가-힣]/)?.[0];
+  const index = await fetchHealthProductIndex({ keywords: keywords && keywords.length <= 4 ? keywords : companyKeyword ? [companyKeyword] : null });
   const matchedIds = query ? filterHealthProducts(index.items, [], query, target) : null;
   const result = pageHealthProducts(index, [], { page, matchedIds, company, includeExport });
   return {
@@ -21,6 +23,19 @@ export async function searchHealthProductsLive({ page = 1, query = "", target = 
     items: result.items, indexedTotal: index.total, fetchedAt: index.syncedAt,
     sourceUrl: index.sourceUrl, searchBasis: target === "name" ? "제품명" : target === "all" ? "제품명·품목유형" : "품목유형"
   };
+}
+
+function sourceSearchKeywords(node) {
+  if (!node || node.type === "NOT") return null;
+  // 한 글자로 후보를 좁히면 ‘더파르마’와 ‘더 파르마’를 모두 유지할 수 있다.
+  if (node.type === "TERM") {
+    const letter = node.value.match(/[가-힣]/)?.[0];
+    return letter ? [letter] : null;
+  }
+  const left = sourceSearchKeywords(node.left);
+  const right = sourceSearchKeywords(node.right);
+  if (node.type === "AND") return !left ? right : !right ? left : left.length <= right.length ? left : right;
+  return left && right ? [...new Set([...left, ...right])] : null;
 }
 
 export async function fetchHealthProductDetailLive(id) {
@@ -42,12 +57,17 @@ export async function fetchHealthProductTypesLive(ids) {
   return { items: details.map((item) => ({ id: item.id, allTypes: item.allTypes || "", typeError: item.detailError || "" })) };
 }
 
-export async function fetchHealthProductIndex() {
+export async function fetchHealthProductIndex({ keywords = null } = {}) {
   const session = await openSession();
-  const [included, excluded] = await Promise.all([
-    fetchProductList(session, "I"),
-    fetchProductList(session, "E")
-  ]);
+  const included = [];
+  let excluded = [];
+  if (keywords?.length) {
+    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword));
+  } else {
+    const lists = await Promise.all([fetchProductList(session, "I"), fetchProductList(session, "E")]);
+    included.push(...lists[0]);
+    excluded = lists[1];
+  }
   const byId = new Map();
   for (const row of [...included, ...excluded]) {
     const item = normalizeListItem(row);
@@ -204,12 +224,13 @@ async function openSession() {
   return { callPage, cookie: cookies.join("; ") };
 }
 
-async function fetchProductList(session, condition) {
+async function fetchProductList(session, condition, keyword = " ") {
+  const pageSize = 2000;
   const body = new URLSearchParams({
     s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
     s_prdlst_cd: "all", s_bsn_nm: "", s_prd_nm: "", s_prdlst_report_no: "",
-    s_opt1: condition, s_keyword1: " ", s_opt2: "Y", s_opt3: "0", s_keyword2: "",
-    s_order_by: "prdlst_nm", s_list_cnt: "50000", s_page_num: "1", s_prefix: "",
+    s_opt1: condition, s_keyword1: keyword, s_opt2: "Y", s_opt3: "0", s_keyword2: "",
+    s_order_by: "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });
@@ -218,17 +239,23 @@ async function fetchProductList(session, condition) {
     throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
   }
   const expected = Number(count.totCnt);
-  const rows = [];
-  for (let page = 1; rows.length < expected; page++) {
-    body.set("s_page_num", String(page));
-    const payload = await requestProductList(session, "searchPrdList_1", body);
-    if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
-    const remaining = expected - rows.length;
-    if (payload.prdList.length !== Math.min(50000, remaining)) {
-      throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page}페이지). 기존 자료를 유지합니다. 다시 수집해주세요.`);
+  const pages = [];
+  const pageCount = Math.ceil(expected / pageSize);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(3, pageCount) }, async () => {
+    while (cursor < pageCount) {
+      const page = cursor++;
+      const params = new URLSearchParams(body);
+      params.set("s_page_num", String(page + 1));
+      const payload = await requestProductList(session, "searchPrdList_1", params);
+      if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
+      if (payload.prdList.length !== Math.min(pageSize, expected - page * pageSize)) {
+        throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page + 1}페이지). 다시 검색해주세요.`);
+      }
+      pages[page] = payload.prdList;
     }
-    rows.push(...payload.prdList);
-  }
+  }));
+  const rows = pages.flat();
   // E분류 검색에도 식품(001) 기록이 있어 목록의 품목분류 코드로 검증한다.
   if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || !String(row.PREFIX_PRDLST_CD || row.PRDLST_CD || "").startsWith("E"))
     || new Set(rows.map((row) => row.PRDLST_REPORT_LEDG_NO)).size !== expected) {

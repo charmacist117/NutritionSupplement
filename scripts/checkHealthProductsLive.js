@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -7,10 +7,14 @@ let revision = 1;
 let sessions = 0;
 let brokenCount = false;
 let listRequests = 0;
+let testRows = null;
+let timeoutSource = false;
+let sourceRequests = [];
 const raw = (id, name, type) => ({ PRDLST_REPORT_LEDG_NO: String(id), PRDLST_NM: name, PRDLST_CD_NM: type, BSSH_NM: id % 2 ? "엠에스바이오텍(주)" : "엔피케이(주)", PREFIX_PRDLST_CD: "E", FOOD_HF_LS_CL_CD: id === 1 ? "001" : "002" });
 globalThis.fetch = async (url, options = {}) => {
   assert.equal(new URL(url).hostname, "www.foodsafetykorea.go.kr");
   if (url.endsWith("searchInfoProduct.do")) {
+    if (timeoutSource) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     sessions++;
     return new Response('<input name="callPage" value="123">', { headers: { "set-cookie": "session=test; Path=/" } });
   }
@@ -23,13 +27,17 @@ globalThis.fetch = async (url, options = {}) => {
   }
   listRequests++;
   assert.equal(options.method, "POST");
-  assert.equal(options.body.get("s_keyword1"), " ");
-  const rows = options.body.get("s_opt1") === "I"
-    ? Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D"))
-    : [raw(21, "마그네슘(수출용)", "마그네슘")];
+  const keyword = options.body.get("s_keyword1");
+  const allRows = testRows || [...Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D")), raw(21, "마그네슘(수출용)", "마그네슘")];
+  const rows = allRows.filter((row) => keyword === " " ? row.PRDLST_NM.includes(" ") === (options.body.get("s_opt1") === "I")
+    : [row.PRDLST_NM, row.BSSH_NM].some((value) => value.includes(keyword)));
+  sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num") });
   if (url.includes("searchPrdListCnt_1")) return Response.json({ totCnt: brokenCount ? null : rows.length });
   assert.ok(url.endsWith("searchPrdList_1.do"));
-  return Response.json({ prdList: rows });
+  const pageSize = Number(options.body.get("s_list_cnt"));
+  assert.ok(pageSize <= 2000);
+  const start = (Number(options.body.get("s_page_num")) - 1) * pageSize;
+  return Response.json({ prdList: rows.slice(start, start + pageSize) });
 };
 
 try {
@@ -89,6 +97,29 @@ try {
   assert.equal(response.statusCode, 400);
   await handler({ method: "POST" }, response);
   assert.equal(response.statusCode, 405);
+  testRows = [raw(1, "더파르마 마그네슘", "마그네슘"), raw(2, "더 파르마 마그네슘", "마그네슘"),
+    raw(3, "또브랜드 비타민 D", "비타민 D"), raw(4, "더파르마(수출용)", "마그네슘"), raw(5, "OTHER", "아연")];
+  const normalized = testRows.map((row) => ({ id: row.PRDLST_REPORT_LEDG_NO, name: row.PRDLST_NM, company: row.BSSH_NM, type: row.PRDLST_CD_NM }));
+  for (const query of ["더파르마", "더파르마 OR 또브랜드", "더파르마 AND NOT 마그네슘", "더파르마 OR NOT 또브랜드", "NOT 또브랜드", "(OTHER OR 더파르마) AND NOT 수출용"]) {
+    const result = await searchHealthProductsLive({ query, includeExport: false });
+    const expected = [...filterHealthProducts(normalized.filter((row) => !row.name.includes("(수출용)")), [], query, "name")];
+    assert.deepEqual(result.items.map((row) => row.id).sort(), expected.sort(), query);
+  }
+  sourceRequests = [];
+  const spaced = await searchHealthProductsLive({ query: "더파르마", includeExport: false });
+  assert.equal(spaced.total, 2);
+  assert.deepEqual([...new Set(sourceRequests.map((request) => request.keyword))], ["더"]);
+  testRows = Array.from({ length: 4501 }, (_, i) => raw(i + 1, `더파르마 ${i}`, "마그네슘"));
+  sourceRequests = [];
+  const lastPage = await searchHealthProductsLive({ query: "더파르마", page: 226 });
+  assert.equal(lastPage.total, 4501);
+  assert.equal(lastPage.items.length, 1);
+  assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => request.page).sort(), ["1", "2", "3"]);
+  testRows = null;
+  timeoutSource = true;
+  await handler({ method: "GET", query: {} }, response);
+  assert.equal(response.statusCode, 504);
+  assert.match(response.data.error, /응답이 지연/);
   console.log("live health product search and detail checks ok");
 } finally {
   globalThis.fetch = originalFetch;
