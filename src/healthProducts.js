@@ -6,6 +6,32 @@ export const HEALTH_PRODUCTS_SOURCE_URL = `${ORIGIN}/portal/specialinfo/searchIn
 export const HEALTH_PRODUCT_CHUNK_SIZE = 500;
 export const HEALTH_PRODUCT_PAGE_SIZE = 20;
 
+export async function searchHealthProductsLive({ page = 1, query = "", target = "name", includeExport = true } = {}) {
+  if (!["name", "ingredients", "all"].includes(target)) {
+    const error = new Error("검색 대상을 확인해주세요.");
+    error.status = 400;
+    throw error;
+  }
+  parseBooleanQuery(query);
+  const index = await fetchHealthProductIndex();
+  const matchedIds = query ? filterHealthProducts(index.items, [], query, target) : null;
+  const result = pageHealthProducts(index, [], { page, matchedIds, includeExport });
+  return {
+    page: result.page, pageSize: result.pageSize, total: result.total, totalPages: result.totalPages,
+    items: result.items, indexedTotal: index.total, fetchedAt: index.syncedAt,
+    sourceUrl: index.sourceUrl, searchBasis: target === "name" ? "제품명" : target === "all" ? "제품명·품목유형" : "품목유형"
+  };
+}
+
+export async function fetchHealthProductDetailLive(id) {
+  if (!/^\d{1,30}$/.test(String(id || ""))) {
+    const error = new Error("제품 ID가 올바르지 않습니다.");
+    error.status = 400;
+    throw error;
+  }
+  return fetchProductDetail(await openSession(), { id });
+}
+
 export async function fetchHealthProductIndex() {
   const session = await openSession();
   const [included, excluded] = await Promise.all([
@@ -190,7 +216,8 @@ async function fetchProductList(session, condition) {
     }
     rows.push(...payload.prdList);
   }
-  if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || row.FOOD_HF_LS_CL_CD !== "002")
+  // E분류 검색에도 식품(001) 기록이 있어 목록의 품목분류 코드로 검증한다.
+  if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || !String(row.PREFIX_PRDLST_CD || row.PRDLST_CD || "").startsWith("E"))
     || new Set(rows.map((row) => row.PRDLST_REPORT_LEDG_NO)).size !== expected) {
     throw new Error("식품안전나라 제품 ID·분류·중복 검증에 실패했습니다. 다시 수집해주세요.");
   }

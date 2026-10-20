@@ -34,10 +34,12 @@
 - `NAVER_ACTIVE_PROFILE`: Blob에 저장된 선택값이 없을 때 사용할 기본 프로필 코드
 - `NAVER_CLIENTS_JSON`: 여러 키를 JSON 한 줄로 넣고 싶을 때 사용. 예: `[{"clientId":"...","clientSecret":"..."},{"clientId":"...","clientSecret":"..."}]`
 - `BLOB_READ_WRITE_TOKEN`: Vercel Blob 연결 시 자동 생성되는 저장소 토큰
-- `CRON_SECRET`: 건강기능식품 제품 목록 자동 갱신에 필요한 보호 토큰
+- `CRON_SECRET`: 수동 관리 API 보호용 선택값
 - `CHROME_EXECUTABLE_PATH`: 로컬에서 브라우저 수집기를 직접 돌릴 때만 필요
 
-건강기능식품 조합 검색의 제품 목록은 매일 한국시간 03시(UTC 18시)에 갱신을 시도합니다. 자동 갱신에는 Vercel Production 환경변수 `CRON_SECRET`이 필요하며, 갱신 실패 시 기존 목록을 유지합니다. 화면의 **목록 갱신** 버튼으로 즉시 다시 시도할 수도 있습니다. 최신 목록에서 사라진 품목은 검색 결과에서 제외하지만, 저장된 상세정보는 나중에 다시 나타날 경우를 위해 보존합니다.
+건강기능식품 검색은 검색·페이지 이동 때마다 식품안전나라에 접속하여 공백 포함·미포함 목록을 새로 조회하고, 제품 ID로 중복을 제거합니다. 사전 수집이나 Blob 저장소가 필요하지 않습니다. 제품의 **상세** 버튼을 누를 때도 원본 상세 페이지를 새로 조회합니다. 원본 사이트의 응답 시간에 따라 검색에 시간이 걸릴 수 있으며, 조회 실패는 오류로 표시합니다.
+
+검색 대상은 **제품명**, **품목유형**, **제품명 + 품목유형**입니다. AND/OR/NOT 검색식과 수출용 포함 여부를 지원합니다. 품목유형은 원본 목록의 분류명이므로 전체 성분·원료 검색과는 다릅니다. 전체 원료 표는 상세 화면에서 확인합니다. 이전에 저장된 자료는 보존하지만 실시간 검색에는 사용하지 않습니다. 제품 목록의 일일 자동 갱신은 제거했습니다.
 
 네이버 API 키는 `NAVER_CLIENTS_JSON`, 번호형 변수, 기존 단일 변수 순서로 읽고 중복은 제거합니다. 한 키가 `Query limit exceeded`를 반환하면 같은 요청을 다음 키로 이어서 시도합니다.
 같은 프로필 코드를 가진 키는 하나의 계정 묶음으로 표시됩니다. 환경설정 탭에서 활성 프로필을 저장하면 다음 수집부터 해당 프로필의 키만 사용하며, Client Secret은 브라우저나 Blob에 저장하지 않습니다.
@@ -64,3 +66,5 @@ Vercel에는 Blob 저장소를 연결해야 기간별 리포트가 배포 환경
 - `GET /api/health`: 배포 설정 상태
 - `POST /api/collect-monthly`: 선택 기간 리포트 수집 및 저장
 - `POST /api/executive-report`: 선택한 두 구간의 순위 기반 경영진 PDF 생성
+- `GET /api/health-products?q=검색식&target=name|ingredients|all&page=1&includeExport=true`: 최신 제품 목록 검색 (`ingredients`는 품목유형)
+- `GET /api/health-products?id=제품ID`: 제품 상세 원료 실시간 조회

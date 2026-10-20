@@ -5,11 +5,11 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "./monthlyCollector.js";
 import { fetchKeywordTrends, getNaverCredentialCount, getNaverCredentialPool, getNaverCredentialProfiles, NaverShoppingInsightError } from "./naverShoppingInsight.js";
-import { deleteMonthlyReport, getHealthFunctionalIngredients, getHealthProductDetailChunk, getHealthProductSearchChunk, getHealthProductsIndex, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveHealthFunctionalIngredients, saveHealthProductDetailChunk, saveHealthProductSearchChunk, saveHealthProductsIndex, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
+import { deleteMonthlyReport, getHealthFunctionalIngredients, getKeywordCategoryMappings, getMonthlyReport, getNaverApiSettings, hasBlobCredentials, listMonthlyReports, saveHealthFunctionalIngredients, saveKeywordCategoryMappings, saveMonthlyReport, saveNaverApiSettings } from "./storage.js";
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
-import { buildHealthProductSearchRows, fetchHealthProductDetails, fetchHealthProductIndex, filterHealthProducts, HEALTH_PRODUCT_CHUNK_SIZE, mergeHealthProductSearchRows, pageHealthProducts, refreshHealthProductIndex } from "./healthProducts.js";
+import { fetchHealthProductDetailLive, searchHealthProductsLive } from "./healthProducts.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -112,79 +112,13 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/health-products") {
-      const options = { outputDir: join(rootDir, "data", "health-products") };
-      if (request.method === "GET") {
-        const index = await getHealthProductsIndex(options);
-        if (!index) return sendJson(response, 404, { error: "저장된 건강기능식품 제품 자료가 없습니다. 전체 수집을 시작해주세요." });
-        const query = String(url.searchParams.get("q") || "").trim();
-        let searchRows = [];
-        let matchedIds = null;
-        const target = url.searchParams.get("target") || "ingredients";
-        if (query && target !== "name") {
-          const chunkCount = Math.ceil(Number(index.searchIndexedThrough || 0) / HEALTH_PRODUCT_CHUNK_SIZE);
-          const detailSearchRows = (await Promise.all(Array.from({ length: chunkCount }, (_, number) => getHealthProductSearchChunk(number, options)))).flat();
-          searchRows = mergeHealthProductSearchRows(index.items, detailSearchRows);
-          matchedIds = filterHealthProducts(index.items, detailSearchRows, query, target);
-        }
-        if (query && target === "name") matchedIds = filterHealthProducts(index.items, [], query, target);
-        const params = { page: url.searchParams.get("page"), matchedIds, includeExport: url.searchParams.get("includeExport") !== "false" };
-        const first = pageHealthProducts(index, [], params);
-        const chunks = [...new Set(first.items.filter((item) => item.index < index.detailTotal).map((item) => Math.floor(item.index / HEALTH_PRODUCT_CHUNK_SIZE)))];
-        const ingredientMap = new Map(searchRows.map((item) => [item.id, item.ingredients]));
-        const details = (await Promise.all(chunks.map((number) => getHealthProductDetailChunk(number, options)))).flat()
-          .map((item) => ({ ...item, ingredientText: item.ingredientText || ingredientMap.get(item.id) || buildHealthProductSearchRows([item])[0]?.ingredients || "" }));
-        return sendJson(response, 200, pageHealthProducts(index, details, params));
-      }
-      if (request.method === "POST") {
-        const body = await readJson(request);
-        let index = body.reset ? null : await getHealthProductsIndex(options);
-        if (index && body.refreshList) {
-          const previousTotal = index.total;
-          index = refreshHealthProductIndex(index, await fetchHealthProductIndex());
-          await saveHealthProductsIndex(index, options);
-          return sendJson(response, 200, { ...productSyncStatus(index), added: index.total - previousTotal, removed: index.total - index.activeTotal });
-        }
-        if (!index) {
-          index = await fetchHealthProductIndex();
-          const storage = await saveHealthProductsIndex(index, options);
-          if (!storage.saved) return sendJson(response, 503, { error: "Blob 저장소가 연결되어야 제품 자료를 저장할 수 있습니다.", storage });
-          return sendJson(response, 200, { ...productSyncStatus(index), added: index.total, removed: 0 });
-        }
-        const indexedThrough = Number(index.searchIndexedThrough || 0);
-        const detailTotal = Number(index.detailTotal || 0);
-        if (indexedThrough < detailTotal) {
-          const number = Math.floor(indexedThrough / HEALTH_PRODUCT_CHUNK_SIZE);
-          const details = await getHealthProductDetailChunk(number, options);
-          await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(details), options);
-          index.searchIndexedThrough = Math.min(detailTotal, (number + 1) * HEALTH_PRODUCT_CHUNK_SIZE);
-          index.updatedAt = new Date().toISOString();
-          await saveHealthProductsIndex(index, options);
-        } else if (detailTotal < index.total) {
-          const start = Number(index.nextDetailIndex || 0);
-          const fetched = await fetchHealthProductDetails(index.items.slice(start, start + 30));
-          const grouped = new Map();
-          fetched.forEach((item, offset) => {
-            const number = Math.floor((start + offset) / HEALTH_PRODUCT_CHUNK_SIZE);
-            if (!grouped.has(number)) grouped.set(number, []);
-            grouped.get(number).push(item);
-          });
-          for (const [number, items] of grouped) {
-            const current = await getHealthProductDetailChunk(number, options);
-            const byId = new Map(current.map((item) => [item.id, item]));
-            items.forEach((item) => byId.set(item.id, item));
-            const merged = [...byId.values()];
-            await saveHealthProductDetailChunk(number, merged, options);
-            await saveHealthProductSearchChunk(number, buildHealthProductSearchRows(merged), options);
-          }
-          index.nextDetailIndex = start + fetched.length;
-          index.detailTotal = index.nextDetailIndex;
-          index.searchIndexedThrough = index.detailTotal;
-          index.complete = index.detailTotal >= index.total;
-          index.updatedAt = new Date().toISOString();
-          await saveHealthProductsIndex(index, options);
-        }
-        return sendJson(response, 200, productSyncStatus(index));
-      }
+      response.setHeader("Cache-Control", "no-store");
+      if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed" });
+      const result = url.searchParams.has("id")
+        ? await fetchHealthProductDetailLive(url.searchParams.get("id"))
+        : await searchHealthProductsLive({ page: url.searchParams.get("page"), query: String(url.searchParams.get("q") || "").trim(),
+          target: url.searchParams.get("target") || "name", includeExport: url.searchParams.get("includeExport") !== "false" });
+      return sendJson(response, 200, result);
     }
 
     if (request.method === "POST" && url.pathname === "/api/comparison-report") {
@@ -308,22 +242,6 @@ function handleError(response, error) {
 function sendJson(response, status, payload) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload, null, 2));
-}
-
-function productSyncStatus(index) {
-  const detailTotal = Number(index.detailTotal || 0);
-  const searchIndexedThrough = Number(index.searchIndexedThrough || 0);
-  const detailComplete = detailTotal >= Number(index.total || 0);
-  const activeItems = index.items.filter((item) => item.active !== false);
-  const activeDetailed = activeItems.filter((item) => item.index < detailTotal).length;
-  const activeIndexed = activeItems.filter((item) => item.index < searchIndexedThrough).length;
-  return {
-    total: activeItems.length, detailTotal: activeDetailed, searchIndexedThrough: activeIndexed, detailComplete,
-    complete: detailComplete && searchIndexedThrough >= detailTotal,
-    progress: activeItems.length ? Math.floor(Math.min(activeDetailed, activeIndexed) / activeItems.length * 1000) / 10 : 0,
-    searchProgress: activeDetailed ? Math.floor(activeIndexed / activeDetailed * 1000) / 10 : 100,
-    syncedAt: index.syncedAt, updatedAt: index.updatedAt || null
-  };
 }
 
 function contentType(filePath) {

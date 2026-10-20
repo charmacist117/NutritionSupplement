@@ -418,28 +418,25 @@
       <section class="products-panel tab-view" data-tab-view="products">
         <div class="ingredients-header">
           <div>
-            <h2>건강기능식품 조합 검색</h2>
-            <p>제품 상세정보의 성분 및 원료를 기준으로 원하는 주원료 조합을 검색합니다.</p>
+            <h2>건강기능식품 검색</h2>
+            <p>검색할 때마다 식품안전나라의 최신 제품 목록을 조회합니다. 상세 원료는 제품을 눌러 확인하세요.</p>
           </div>
           <div class="ingredients-actions">
             <a class="source-link" href="https://www.foodsafetykorea.go.kr/portal/specialinfo/searchInfoProduct.do" target="_blank" rel="noreferrer">원문 보기</a>
-            <button id="products-refresh" class="secondary-button" type="button">목록 갱신</button>
-            <button id="products-sync" type="button">전체 수집</button>
           </div>
         </div>
         <form id="products-search-form" class="product-search-controls">
-          <label>검색 대상<select id="products-search-target"><option value="ingredients">주원료</option><option value="name">제품명</option><option value="all">전체</option></select></label>
+          <label>검색 대상<select id="products-search-target"><option value="name">제품명</option><option value="ingredients">품목유형</option><option value="all">제품명 + 품목유형</option></select></label>
           <label>검색식<input id="products-query" type="search" placeholder="오메가3 AND 비타민D"></label>
           <label class="product-export-toggle"><input id="products-include-export" type="checkbox" checked> 수출용 포함</label>
           <button type="submit">검색</button>
         </form>
-        <p class="product-query-help"><strong>검색식:</strong> 검색 대상은 주원료, 제품명 또는 전체에서 선택합니다. AND는 모두 포함, OR는 하나 이상 포함, NOT은 제외하며 괄호와 따옴표 구문을 사용할 수 있습니다. 예: <code>(마그네슘 OR 칼슘) AND 비타민D AND NOT 아연</code> · 상세 수집 전 주원료는 품목유형으로 검색합니다.</p>
-        <p id="products-status" class="comparison-status">저장된 제품 자료를 불러옵니다.</p>
-        <progress id="products-progress" max="100" value="0"></progress>
+        <p class="product-query-help"><strong>검색식:</strong> AND는 모두 포함, OR는 하나 이상 포함, NOT은 제외하며 괄호와 따옴표를 사용할 수 있습니다. 예: <code>(마그네슘 OR 칼슘) AND NOT 아연</code> · 품목유형은 원본 목록의 분류명이며, 제품의 전체 성분·원료 검색은 지원하지 않습니다. 상세 원료는 상세 버튼으로 실시간 조회합니다.</p>
+        <p id="products-status" class="comparison-status" role="status" aria-live="polite">검색 조건을 입력하세요. 비워 두고 검색하면 전체 목록을 조회합니다.</p>
         <div class="table-wrap products-table-wrap">
           <table>
-            <thead><tr><th>상세</th><th>제품명</th><th>주원료</th><th>업체명</th><th>품목보고번호</th><th>품목유형</th><th>소비기한</th><th>내수/수출</th><th></th></tr></thead>
-            <tbody id="products-body"><tr><td colspan="9">자료를 불러오지 않았습니다.</td></tr></tbody>
+            <thead><tr><th>제품명</th><th>업체명</th><th>품목보고번호</th><th>품목유형</th><th>소비기한</th><th>내수/수출</th><th>상세정보</th></tr></thead>
+            <tbody id="products-body"><tr><td colspan="7">검색하면 최신 제품 목록이 표시됩니다.</td></tr></tbody>
           </table>
         </div>
         <div class="ingredients-pagination">
