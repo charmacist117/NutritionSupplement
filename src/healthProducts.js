@@ -57,16 +57,18 @@ export async function fetchHealthProductTypesLive(ids) {
   return { items: details.map((item) => ({ id: item.id, allTypes: item.allTypes || "", typeError: item.detailError || "" })) };
 }
 
-export async function fetchHealthProductIndex({ keywords = null, timeoutMs = 45000 } = {}) {
+export async function fetchHealthProductIndex({ keywords = null, bulk = false } = {}) {
   const session = await openSession();
   const included = [];
   let excluded = [];
   if (keywords?.length) {
-    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword, timeoutMs));
+    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword, bulk));
   } else {
-    const lists = await Promise.all([fetchProductList(session, "I", " ", timeoutMs), fetchProductList(session, "E", " ", timeoutMs)]);
-    included.push(...lists[0]);
-    excluded = lists[1];
+    const lists = await Promise.allSettled([fetchProductList(session, "I", " ", bulk), fetchProductList(session, "E", " ", bulk)]);
+    const failed = lists.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+    included.push(...lists[0].value);
+    excluded = lists[1].value;
   }
   const byId = new Map();
   for (const row of [...included, ...excluded]) {
@@ -230,8 +232,9 @@ async function openSession() {
   return { callPage, cookie: cookies.join("; ") };
 }
 
-async function fetchProductList(session, condition, keyword = " ", timeoutMs = 45000) {
-  const pageSize = 2000;
+async function fetchProductList(session, condition, keyword = " ", bulk = false) {
+  const pageSize = bulk ? 500 : 2000;
+  const timeoutMs = bulk ? 120000 : 45000;
   const body = new URLSearchParams({
     s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
     s_prdlst_cd: "all", s_bsn_nm: "", s_prd_nm: "", s_prdlst_report_no: "",
@@ -248,19 +251,24 @@ async function fetchProductList(session, condition, keyword = " ", timeoutMs = 4
   const pages = [];
   const pageCount = Math.ceil(expected / pageSize);
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(3, pageCount) }, async () => {
-    while (cursor < pageCount) {
+  let failure;
+  await Promise.all(Array.from({ length: Math.min(bulk ? 1 : 3, pageCount) }, async () => {
+    while (cursor < pageCount && !failure) {
       const page = cursor++;
       const params = new URLSearchParams(body);
       params.set("s_page_num", String(page + 1));
-      const payload = await requestProductList(session, "searchPrdList_1", params, timeoutMs);
-      if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
-      if (payload.prdList.length !== Math.min(pageSize, expected - page * pageSize)) {
-        throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page + 1}페이지). 다시 검색해주세요.`);
-      }
-      pages[page] = payload.prdList;
+      try {
+        const payload = await requestProductList(session, "searchPrdList_1", params, timeoutMs);
+        if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
+        if (payload.prdList.length !== Math.min(pageSize, expected - page * pageSize)) {
+          throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page + 1}페이지). 다시 검색해주세요.`);
+        }
+        pages[page] = payload.prdList;
+        if (bulk) console.log(`목록 ${condition}: ${page + 1}/${pageCount}페이지 확인`);
+      } catch (error) { failure ||= error; }
     }
   }));
+  if (failure) throw failure;
   const rows = pages.flat();
   // E분류 검색에도 식품(001) 기록이 있어 목록의 품목분류 코드로 검증한다.
   if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || !String(row.PREFIX_PRDLST_CD || row.PRDLST_CD || "").startsWith("E"))

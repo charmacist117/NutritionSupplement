@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductIndex, fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -128,6 +128,10 @@ try {
   assert.equal(lastPage.total, 4501);
   assert.equal(lastPage.items.length, 1);
   assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => request.page).sort(), ["1", "2", "3"]);
+  testRows = testRows.slice(0, 1201);
+  sourceRequests = [];
+  assert.equal((await fetchHealthProductIndex({ bulk: true })).total, 1201);
+  assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => [request.page, request.pageSize]).sort(), [["1", "500"], ["2", "500"], ["3", "500"]]);
   testRows = null;
   timeoutSource = true;
   await handler({ method: "GET", query: {} }, response);

@@ -47,7 +47,7 @@ async function main() {
   console.log(`기존 유형 기록 ${previous.length}개, 원본 제품 목록 조회`);
   let index;
   for (let attempt = 0; attempt < 3; attempt++) {
-    try { index = await fetchHealthProductIndex({ timeoutMs: 180000 }); break; }
+    try { index = await fetchHealthProductIndex({ bulk: true }); break; }
     catch (error) { if (attempt === 2) throw error; console.error(error.message); }
   }
   if (!index.total) throw new Error("원본 목록이 비어 있어 게시하지 않습니다.");
