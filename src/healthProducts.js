@@ -239,7 +239,7 @@ async function fetchProductList(session, condition, keyword = " ", bulk = false)
     s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
     s_prdlst_cd: "all", s_bsn_nm: "", s_prd_nm: "", s_prdlst_report_no: "",
     s_opt1: condition, s_keyword1: keyword, s_opt2: "Y", s_opt3: "0", s_keyword2: "",
-    s_order_by: "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
+    s_order_by: bulk ? "reg_dt" : "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });

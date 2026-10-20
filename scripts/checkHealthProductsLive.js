@@ -10,6 +10,7 @@ let listRequests = 0;
 let testRows = null;
 let timeoutSource = false;
 let sourceRequests = [];
+let failedListPage = null;
 const raw = (id, name, type) => ({ PRDLST_REPORT_LEDG_NO: String(id), PRDLST_NM: name, PRDLST_CD_NM: type, BSSH_NM: id % 2 ? "엠에스바이오텍(주)" : "엔피케이(주)", PREFIX_PRDLST_CD: "E", FOOD_HF_LS_CL_CD: id === 1 ? "001" : "002" });
 globalThis.fetch = async (url, options = {}) => {
   assert.equal(new URL(url).hostname, "www.foodsafetykorea.go.kr");
@@ -32,9 +33,10 @@ globalThis.fetch = async (url, options = {}) => {
   const allRows = testRows || [...Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D")), raw(21, "마그네슘(수출용)", "마그네슘")];
   const rows = allRows.filter((row) => keyword === " " ? row.PRDLST_NM.includes(" ") === (options.body.get("s_opt1") === "I")
     : [row.PRDLST_NM, row.BSSH_NM].some((value) => value.includes(keyword)));
-  sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num"), pageSize: options.body.get("s_list_cnt") });
+  sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num"), pageSize: options.body.get("s_list_cnt"), order: options.body.get("s_order_by") });
   if (url.includes("searchPrdListCnt_1")) return Response.json({ totCnt: brokenCount ? null : rows.length });
   assert.ok(url.endsWith("searchPrdList_1.do"));
+  if (options.body.get("s_page_num") === failedListPage) return new Response("source error", { status: 503 });
   const pageSize = Number(options.body.get("s_list_cnt"));
   assert.ok(pageSize <= 2000);
   const start = (Number(options.body.get("s_page_num")) - 1) * pageSize;
@@ -131,7 +133,14 @@ try {
   testRows = testRows.slice(0, 1201);
   sourceRequests = [];
   assert.equal((await fetchHealthProductIndex({ bulk: true })).total, 1201);
+  assert.ok(sourceRequests.every((request) => request.order === "reg_dt"));
   assert.deepEqual(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).map((request) => [request.page, request.pageSize]).sort(), [["1", "500"], ["2", "500"], ["3", "500"]]);
+  testRows = Array.from({ length: 10001 }, (_, i) => raw(i + 1, `더파르마 ${i}`, "마그네슘"));
+  sourceRequests = [];
+  failedListPage = "1";
+  await assert.rejects(searchHealthProductsLive({ query: "더파르마" }), /503/);
+  assert.ok(sourceRequests.filter((request) => request.endpoint.endsWith("searchPrdList_1.do")).every((request) => Number(request.page) <= 3));
+  failedListPage = null;
   testRows = null;
   timeoutSource = true;
   await handler({ method: "GET", query: {} }, response);
