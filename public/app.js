@@ -589,8 +589,8 @@ async function loadProducts(page = 1) {
   productsRequest?.abort();
   const controller = new AbortController();
   productsRequest = controller;
-  productsStatus.textContent = "식품안전나라에서 최신 제품 목록을 조회하는 중입니다.";
-  productsBody.innerHTML = '<tr><td colspan="8">최신 제품 목록을 불러오는 중입니다.</td></tr>';
+  productsStatus.textContent = productsSearchTarget.value === "name" ? "식품안전나라에서 최신 제품 목록을 조회하는 중입니다." : "전체 상세 유형 자료에서 검색하는 중입니다.";
+  productsBody.innerHTML = '<tr><td colspan="8">제품 목록을 불러오는 중입니다.</td></tr>';
   productRows.clear();
   productsPrevButton.disabled = true;
   productsNextButton.disabled = true;
@@ -605,10 +605,10 @@ async function loadProducts(page = 1) {
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
         <td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.company)}</td>
-        <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td class="product-ingredients" data-product-types="${escapeHtml(item.id)}">조회 중...</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
+        <td>${escapeHtml(item.reportNumber)}</td><td>${escapeHtml(item.type)}</td><td class="product-ingredients" data-product-types="${escapeHtml(item.id)}">${typeof item.allTypes === "string" ? escapeHtml(item.allTypes || "원문 미기재") : "조회 중..."}</td><td>${escapeHtml(item.shelfLife)}</td><td>${escapeHtml(item.domesticExport)}</td>
         <td><button class="secondary-button compact-button" type="button" data-product-id="${escapeHtml(item.id)}">상세</button></td>
       </tr>`).join("") : '<tr><td colspan="8">검색 결과가 없습니다.</td></tr>';
-    productsStatus.textContent = `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · ${data.searchBasis} 기준 · 조회 ${new Date(data.fetchedAt).toLocaleString("ko-KR")}`;
+    productsStatus.textContent = `검색 결과 ${data.total.toLocaleString("ko-KR")}건 · ${data.searchBasis} 기준 · ${data.catalogBuiltAt ? "검색 자료 갱신" : "조회"} ${new Date(data.fetchedAt).toLocaleString("ko-KR")}`;
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
@@ -627,16 +627,17 @@ async function loadProducts(page = 1) {
           const type = byId.get(item.id);
           const cell = productsBody.querySelector(`[data-product-types="${CSS.escape(item.id)}"]`);
           const error = !type ? "제품의 유형 응답이 없습니다." : type.typeError;
-          cell.textContent = error ? "조회 실패" : type.allTypes || "원문 미기재";
-          cell.title = error || "";
+          cell.textContent = error ? (typeof item.allTypes === "string" ? `${item.allTypes || "원문 미기재"} (저장 자료)` : "조회 실패") : type.allTypes || "원문 미기재";
+          cell.title = error ? `${error}${item.typesFetchedAt ? ` · 저장 자료 확인: ${new Date(item.typesFetchedAt).toLocaleString("ko-KR")}` : ""}` : "";
           if (error) failures++;
         }
         productsStatus.textContent = productsStatus.textContent.replace(" · 품목 총 유형 조회 중", failures ? ` · 품목 총 유형 ${failures}건 조회 실패 (상세 버튼으로 재확인)` : " · 품목 총 유형 확인 완료");
       } catch (error) {
         if (controller.signal.aborted || productsRequest !== controller) return;
         for (const cell of productsBody.querySelectorAll("[data-product-types]")) {
-          cell.textContent = "조회 실패";
-          cell.title = error.message;
+          const item = productRows.get(cell.dataset.productTypes);
+          cell.textContent = typeof item?.allTypes === "string" ? `${item.allTypes || "원문 미기재"} (저장 자료)` : "조회 실패";
+          cell.title = `${error.message}${item?.typesFetchedAt ? ` · 저장 자료 확인: ${new Date(item.typesFetchedAt).toLocaleString("ko-KR")}` : ""}`;
         }
         productsStatus.textContent = productsStatus.textContent.replace(" · 품목 총 유형 조회 중", " · 품목 총 유형 조회 실패 (상세 버튼으로 재확인)");
       }

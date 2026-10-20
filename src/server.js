@@ -9,7 +9,8 @@ import { deleteMonthlyReport, getHealthFunctionalIngredients, getKeywordCategory
 import { HEALTH_FOOD_CATEGORY } from "./categories.js";
 import { createComparisonReportPdf, createExecutiveReportPdf } from "./executiveReport.js";
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, searchHealthProductsLive } from "./healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "./healthProducts.js";
+import { searchHealthProducts } from "./productTypeCatalog.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -117,7 +118,7 @@ const server = createServer(async (request, response) => {
       const result = url.searchParams.has("id")
         ? await fetchHealthProductDetailLive(url.searchParams.get("id"))
         : url.searchParams.has("ids") ? await fetchHealthProductTypesLive(url.searchParams.get("ids").split(","))
-        : await searchHealthProductsLive({ page: url.searchParams.get("page"), query: String(url.searchParams.get("q") || "").trim(),
+        : await searchHealthProducts({ page: url.searchParams.get("page"), query: String(url.searchParams.get("q") || "").trim(),
           target: url.searchParams.get("target") || "name", company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false" });
       return sendJson(response, 200, result);
     }

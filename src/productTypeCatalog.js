@@ -10,7 +10,7 @@ export function validateProductTypeCatalog(catalog) {
   if (catalog?.schemaVersion !== 1 || catalog.complete !== true || !Array.isArray(catalog.items) || !catalog.items.length
     || catalog.total !== catalog.items.length || !Number.isFinite(Date.parse(catalog.builtAt))
     || new Set(catalog.items.map((item) => item.id)).size !== catalog.total
-    || catalog.items.some((item) => !/^\d{1,30}$/.test(item.id) || typeof item.name !== "string"
+    || catalog.items.some((item) => typeof item.id !== "string" || !/^\d{1,30}$/.test(item.id) || typeof item.name !== "string"
       || typeof item.company !== "string" || typeof item.allTypes !== "string" || item.detailError || item.typeError
       || !Number.isFinite(Date.parse(item.typesFetchedAt)))) {
     throw new Error("전체 유형 자료 검증에 실패했습니다.");
@@ -32,7 +32,7 @@ export async function loadProductTypeCatalog() {
         try {
           const data = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(20000) });
           if (!data.ok) throw new Error(`자료 다운로드 오류 (${data.status})`);
-          cachedCatalog = validateProductTypeCatalog(JSON.parse(gunzipSync(Buffer.from(await data.arrayBuffer()))));
+          cachedCatalog = validateProductTypeCatalog(JSON.parse(gunzipSync(Buffer.from(await data.arrayBuffer()), { maxOutputLength: 64 * 1024 * 1024 })));
           checkedAt = Date.now();
           return cachedCatalog;
         } catch (error) { console.error("Product type catalog asset:", error.message); }

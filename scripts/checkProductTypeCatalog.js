@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { collectProductTypes } from "./collectProductTypes.js";
 import { validateProductTypeCatalog, searchProductTypeCatalog, searchHealthProducts, loadProductTypeCatalog } from "../src/productTypeCatalog.js";
 import { gzipSync } from "node:zlib";
+import handler from "../api/health-products.js";
 
 const now = new Date().toISOString();
 const items = [
@@ -32,22 +33,34 @@ const rebuilt = await collectProductTypes(items, [items[0], { ...items[1], types
 assert.equal(attempts, 2);
 assert.equal(rebuilt.length, 3);
 assert.equal(saved.length, 2);
-await assert.rejects(collectProductTypes(items, [], async () => {}, async (pending) => pending.map((item) => ({ ...item, detailError: "failed" }))), /3個|3개 제품/);
+await assert.rejects(collectProductTypes(items, [], async () => {}, async (pending) => pending.map((item) => ({ ...item, detailError: "failed" }))), /3개 제품/);
 
 const originalFetch = globalThis.fetch;
 let requests = 0;
+let unavailable = true;
 globalThis.fetch = async (url) => {
   requests++;
-  if (String(url).includes("api.github.com")) return Response.json({ assets: [{ id: 1, state: "uploaded", name: "catalog-1-1.json.gz", browser_download_url: "https://github.com/catalog.gz" }] });
+  if (unavailable) return new Response("not ready", { status: 404 });
+  if (String(url).includes("api.github.com")) return Response.json({ assets: [
+    { id: 2, state: "uploaded", name: "catalog-2-1.json.gz", browser_download_url: "https://github.com/broken.gz" },
+    { id: 1, state: "uploaded", name: "catalog-1-1.json.gz", browser_download_url: "https://github.com/catalog.gz" }
+  ] });
+  if (String(url).includes("broken")) return new Response("invalid");
   return new Response(gzipSync(JSON.stringify(catalog)));
 };
 try {
   await assert.rejects(searchHealthProducts({ target: "bad" }), { status: 400 });
   await assert.rejects(searchHealthProducts({ target: "types", query: "AND" }), { status: 400 });
   assert.equal(requests, 0);
+  await assert.rejects(loadProductTypeCatalog(), { status: 503 });
+  unavailable = false;
   assert.equal((await searchHealthProducts({ target: "types", query: "마그네슘 AND 비타민D" })).total, 2);
   assert.equal((await searchHealthProducts({ target: "ingredients", query: "비타민D" })).total, 3);
   assert.equal((await loadProductTypeCatalog()).total, 3);
-  assert.equal(requests, 2);
+  assert.equal(requests, 4);
+  const response = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; return this; } };
+  await handler({ method: "GET", query: { target: "types", q: "마그네슘 AND 비타민D", company: "코스맥스" } }, response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.data.items.map((item) => item.id), ["1", "3"]);
 } finally { globalThis.fetch = originalFetch; }
 console.log("full product type catalog and resumable collection checks ok");

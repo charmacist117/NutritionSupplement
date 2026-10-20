@@ -57,14 +57,14 @@ export async function fetchHealthProductTypesLive(ids) {
   return { items: details.map((item) => ({ id: item.id, allTypes: item.allTypes || "", typeError: item.detailError || "" })) };
 }
 
-export async function fetchHealthProductIndex({ keywords = null } = {}) {
+export async function fetchHealthProductIndex({ keywords = null, timeoutMs = 45000 } = {}) {
   const session = await openSession();
   const included = [];
   let excluded = [];
   if (keywords?.length) {
-    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword));
+    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword, timeoutMs));
   } else {
-    const lists = await Promise.all([fetchProductList(session, "I"), fetchProductList(session, "E")]);
+    const lists = await Promise.all([fetchProductList(session, "I", " ", timeoutMs), fetchProductList(session, "E", " ", timeoutMs)]);
     included.push(...lists[0]);
     excluded = lists[1];
   }
@@ -230,7 +230,7 @@ async function openSession() {
   return { callPage, cookie: cookies.join("; ") };
 }
 
-async function fetchProductList(session, condition, keyword = " ") {
+async function fetchProductList(session, condition, keyword = " ", timeoutMs = 45000) {
   const pageSize = 2000;
   const body = new URLSearchParams({
     s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
@@ -240,7 +240,7 @@ async function fetchProductList(session, condition, keyword = " ") {
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });
-  const count = await requestProductList(session, "searchPrdListCnt_1", body);
+  const count = await requestProductList(session, "searchPrdListCnt_1", body, timeoutMs);
   if (count.totCnt === null || count.totCnt === undefined || count.totCnt === "" || !Number.isSafeInteger(Number(count.totCnt)) || Number(count.totCnt) < 0) {
     throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
   }
@@ -253,7 +253,7 @@ async function fetchProductList(session, condition, keyword = " ") {
       const page = cursor++;
       const params = new URLSearchParams(body);
       params.set("s_page_num", String(page + 1));
-      const payload = await requestProductList(session, "searchPrdList_1", params);
+      const payload = await requestProductList(session, "searchPrdList_1", params, timeoutMs);
       if (!Array.isArray(payload.prdList)) throw new Error("식품안전나라 제품 목록 형식이 변경되었습니다.");
       if (payload.prdList.length !== Math.min(pageSize, expected - page * pageSize)) {
         throw new Error(`식품안전나라 목록 건수 불일치 (${condition}, ${page + 1}페이지). 다시 검색해주세요.`);
@@ -270,12 +270,15 @@ async function fetchProductList(session, condition, keyword = " ") {
   return rows;
 }
 
-async function requestProductList(session, endpoint, body) {
+async function requestProductList(session, endpoint, body, timeoutMs) {
   const response = await fetch(`${ORIGIN}/ajax/portal/specialinfo/${endpoint}.do`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", Cookie: session.cookie, Referer: HEALTH_PRODUCTS_SOURCE_URL, "X-Requested-With": "XMLHttpRequest" },
     body,
-    signal: AbortSignal.timeout(45000)
+    signal: AbortSignal.timeout(timeoutMs)
+  }).catch((error) => {
+    console.error(`원본 요청 실패: ${endpoint}, 조건 ${body.get("s_opt1")}, 페이지 ${body.get("s_page_num")}: ${error.message}`);
+    throw error;
   });
   if (!response.ok) throw new Error(`식품안전나라 제품 목록 오류 (${response.status})`);
   const payload = await response.json();

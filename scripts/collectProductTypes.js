@@ -5,9 +5,10 @@ import { fetchHealthProductIndex, fetchHealthProductDetails } from "../src/healt
 import { validateProductTypeCatalog } from "../src/productTypeCatalog.js";
 
 export async function collectProductTypes(items, previous, saveBatch, fetchDetails = fetchHealthProductDetails) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const koreanDay = (value) => new Date(Date.parse(value) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const today = koreanDay(new Date().toISOString());
   const byId = new Map(previous.filter((item) => typeof item.allTypes === "string" && !item.detailError
-    && Date.parse(item.typesFetchedAt) >= cutoff).map((item) => [item.id, item]));
+    && Number.isFinite(Date.parse(item.typesFetchedAt)) && koreanDay(item.typesFetchedAt) === today).map((item) => [item.id, item]));
   for (let pass = 0; pass < 3; pass++) {
     const pending = items.filter((item) => !byId.has(item.id));
     for (let offset = 0; offset < pending.length; offset += 100) {
@@ -41,7 +42,7 @@ async function main() {
   console.log(`기존 유형 기록 ${previous.length}개, 원본 제품 목록 조회`);
   let index;
   for (let attempt = 0; attempt < 3; attempt++) {
-    try { index = await fetchHealthProductIndex(); break; }
+    try { index = await fetchHealthProductIndex({ timeoutMs: 180000 }); break; }
     catch (error) { if (attempt === 2) throw error; console.error(error.message); }
   }
   if (!index.total) throw new Error("원본 목록이 비어 있어 게시하지 않습니다.");

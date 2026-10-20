@@ -1,4 +1,5 @@
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "../src/healthProducts.js";
+import { searchHealthProducts } from "../src/productTypeCatalog.js";
 
 export const config = { maxDuration: 60 };
 
@@ -9,7 +10,7 @@ export default async function handler(request, response) {
     const result = request.query.id !== undefined
       ? await fetchHealthProductDetailLive(request.query.id)
       : request.query.ids !== undefined ? await fetchHealthProductTypesLive(String(request.query.ids).split(","))
-      : await searchHealthProductsLive({ page: request.query.page, query: String(request.query.q || "").trim(),
+      : await searchHealthProducts({ page: request.query.page, query: String(request.query.q || "").trim(),
         target: request.query.target || "name", company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false" });
     return response.status(200).json(result);
   } catch (error) {

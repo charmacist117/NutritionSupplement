@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductIndex, fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -31,7 +31,7 @@ globalThis.fetch = async (url, options = {}) => {
   const allRows = testRows || [...Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D")), raw(21, "마그네슘(수출용)", "마그네슘")];
   const rows = allRows.filter((row) => keyword === " " ? row.PRDLST_NM.includes(" ") === (options.body.get("s_opt1") === "I")
     : [row.PRDLST_NM, row.BSSH_NM].some((value) => value.includes(keyword)));
-  sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num") });
+  sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num"), pageSize: options.body.get("s_list_cnt") });
   if (url.includes("searchPrdListCnt_1")) return Response.json({ totCnt: brokenCount ? null : rows.length });
   assert.ok(url.endsWith("searchPrdList_1.do"));
   const pageSize = Number(options.body.get("s_list_cnt"));
