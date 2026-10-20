@@ -8,7 +8,8 @@ export async function collectProductTypes(items, previous, saveBatch, fetchDetai
   const koreanDay = (value) => new Date(Date.parse(value) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const today = koreanDay(new Date().toISOString());
   const byId = new Map(previous.filter((item) => typeof item.allTypes === "string" && !item.detailError
-    && Number.isFinite(Date.parse(item.typesFetchedAt)) && koreanDay(item.typesFetchedAt) === today).map((item) => [item.id, item]));
+    && Number.isFinite(Date.parse(item.typesFetchedAt)) && koreanDay(item.typesFetchedAt) === today)
+    .map(({ id, allTypes, typesFetchedAt }) => [id, { id, allTypes, typesFetchedAt }]));
   for (let pass = 0; pass < 3; pass++) {
     const pending = items.filter((item) => !byId.has(item.id));
     for (let offset = 0; offset < pending.length; offset += 100) {
@@ -39,6 +40,7 @@ async function main() {
   } catch (error) { if (error.code !== "ENOENT") throw error; }
   try { previous.unshift(...validateProductTypeCatalog(JSON.parse(gunzipSync(await readFile(`${directory}/이전.json.gz`)))).items); }
   catch (error) { if (error.code !== "ENOENT") throw error; }
+  await appendFile(checkpoint, "\n");
   console.log(`기존 유형 기록 ${previous.length}개, 원본 제품 목록 조회`);
   let index;
   for (let attempt = 0; attempt < 3; attempt++) {

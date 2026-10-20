@@ -24,7 +24,7 @@ assert.equal(searchProductTypeCatalog(catalog, { query: "더파르마 AND 비타
 assert.throws(() => searchProductTypeCatalog(catalog, { query: "AND" }), { status: 400 });
 let attempts = 0;
 const saved = [];
-const rebuilt = await collectProductTypes(items, [items[0], { ...items[1], typesFetchedAt: "2000-01-01" }],
+const rebuilt = await collectProductTypes(items, [{ ...items[0], name: "이전 제품명" }, { ...items[1], typesFetchedAt: "2000-01-01" }],
   async (batch) => saved.push(...batch), async (pending) => {
     attempts++;
     assert.ok(pending.every((item) => item.id !== "1"));
@@ -32,6 +32,7 @@ const rebuilt = await collectProductTypes(items, [items[0], { ...items[1], types
   });
 assert.equal(attempts, 2);
 assert.equal(rebuilt.length, 3);
+assert.equal(rebuilt[0].name, items[0].name);
 assert.equal(saved.length, 2);
 await assert.rejects(collectProductTypes(items, [], async () => {}, async (pending) => pending.map((item) => ({ ...item, detailError: "failed" }))), /3개 제품/);
 

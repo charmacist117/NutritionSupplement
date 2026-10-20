@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductIndex, fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -22,6 +22,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.includes("prdInfoDetail.do")) {
     const id = new URL(url).searchParams.get("prdlstReportLedgNo");
     if (id === "3") return new Response("upstream unavailable", { status: 503 });
+    if (id === "4") return new Response("<table><tr><td>원본 오류 안내</td></tr></table>");
     const typeRow = id === "2" ? "" : "<table><tr><th>유형</th><td>마그네슘,<br>비타민 D</td></tr></table>";
     return new Response(`<table><tr><th>제품명</th><td>테스트</td></tr></table>${typeRow}<table><tr><th>성분 및 원료</th></tr><tr><td>원료 ${revision}</td></tr></table>`);
   }
@@ -78,6 +79,7 @@ try {
   await assert.rejects(fetchHealthProductTypesLive(["../bad"]), { status: 400 });
   assert.equal(sessions, beforeInvalid);
   assert.equal((await fetchHealthProductDetailLive("1")).ingredientText, "원료 2");
+  await assert.rejects(fetchHealthProductDetailLive("4"), /제품 상세 표/);
   revision = 3;
   assert.equal((await fetchHealthProductDetailLive("1")).ingredientText, "원료 3");
   const listsBeforeTypes = listRequests;
