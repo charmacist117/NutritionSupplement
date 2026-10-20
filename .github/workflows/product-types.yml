@@ -5,6 +5,7 @@ on:
     - cron: '17 19 * * *'
 permissions:
   contents: write
+  statuses: write
 concurrency:
   group: product-type-catalog
   cancel-in-progress: false
@@ -48,3 +49,10 @@ jobs:
         with:
           path: 수집자료/진행.jsonl
           key: product-types-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: 수집 결과 표시
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          if [ "$RESULT" = success ]; then STATE=success; else STATE=failure; fi
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f "state=$STATE" -f 'context=전체 유형 수집' -f "description=수집 작업 $RESULT" > /dev/null

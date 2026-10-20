@@ -1,6 +1,8 @@
 import { readFile, mkdir, appendFile, writeFile } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { fetchHealthProductIndex, fetchHealthProductDetails } from "../src/healthProducts.js";
 import { validateProductTypeCatalog } from "../src/productTypeCatalog.js";
 
@@ -18,9 +20,10 @@ export async function collectProductTypes(items, previous, saveBatch, fetchDetai
       catch (error) { console.error(`상세 세션 실패, 다음 시도에 재수집: ${error.message}`); continue; }
       const verified = batch.filter((item) => !item.detailError && typeof item.allTypes === "string")
         .map((item) => ({ id: item.id, allTypes: item.allTypes, typesFetchedAt: item.fetchedAt }));
-      await saveBatch(verified);
       for (const item of verified) byId.set(item.id, item);
-      console.log(`유형 확인 ${items.filter((item) => byId.has(item.id)).length}/${items.length} (시도 ${pass + 1})`);
+      const completed = items.filter((item) => byId.has(item.id)).length;
+      await saveBatch(verified, completed);
+      console.log(`유형 확인 ${completed}/${items.length} (시도 ${pass + 1})`);
     }
   }
   const missing = items.filter((item) => !byId.has(item.id));
@@ -49,8 +52,16 @@ async function main() {
   }
   if (!index.total) throw new Error("원본 목록이 비어 있어 게시하지 않습니다.");
   console.log(`원본 목록 ${index.total}개 확인`);
-  const items = await collectProductTypes(index.items, previous, async (batch) => {
+  let reportedAt = 0;
+  const items = await collectProductTypes(index.items, previous, async (batch, completed) => {
     if (batch.length) await appendFile(checkpoint, batch.map((item) => JSON.stringify(item)).join("\n") + "\n");
+    if (process.env.GITHUB_ACTIONS && Date.now() - reportedAt >= 60000) {
+      reportedAt = Date.now();
+      try {
+        await promisify(execFile)("gh", ["api", `repos/${process.env.GITHUB_REPOSITORY}/statuses/${process.env.GITHUB_SHA}`,
+          "-f", "state=pending", "-f", "context=전체 유형 수집", "-f", `description=유형 확인 ${completed}/${index.total}`]);
+      } catch (error) { console.error(`수집 진행 표시 실패: ${error.message}`); }
+    }
   });
   const catalog = validateProductTypeCatalog({ schemaVersion: 1, complete: true, total: items.length,
     builtAt: new Date().toISOString(), sourceUrl: index.sourceUrl, items });
