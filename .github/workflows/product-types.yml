@@ -1,8 +1,6 @@
 name: 건강기능식품 전체 유형 갱신
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 19 * * *'
 permissions:
   contents: write
 concurrency:
