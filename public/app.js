@@ -1,5 +1,5 @@
 import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "./comparisonPeriods.js";
-import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority } from "./categoryMappingReview.js";
+import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "./categoryMappingReview.js";
 
 const statusText = document.querySelector("#status");
 const monthList = document.querySelector("#month-list");
@@ -1104,15 +1104,15 @@ function buildMappingRows(reports) {
 function renderMappingSummary() {
   const firstCount = newKeywordRows.filter((row) => row.appearanceType === "first").length;
   const returningCount = newKeywordRows.filter((row) => row.appearanceType === "returning").length;
-  const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
-  const reviews = mappingRows.map((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)));
-  const neededCount = reviews.filter((review) => review.needsReview).length;
+  const reviews = mappingRows.map((row) => ({ ...row, review: mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)) }));
+  const mappedCount = reviews.filter((row) => row.review.priority === 3).length;
+  const neededCount = reviews.filter(isMappingReviewTarget).length;
 
   mappingSummary.innerHTML = [
     comparisonMetricHtml("전체 키워드", `${mappingRows.length}개`, "저장 자료 전체의 고유 검색어"),
-    comparisonMetricHtml("판단 필요", `${neededCount}개`, "추천 없음 또는 복수 카테고리 후보"),
+    comparisonMetricHtml("우선 검토", `${neededCount}개`, "미확정 신규·재진입, 임시 분류, 복수 후보"),
     comparisonMetricHtml("신규·재진입", `${firstCount + returningCount}개`, `최초 등장 ${firstCount}개 · 재진입 ${returningCount}개`),
-    comparisonMetricHtml("직접 분류 / 카테고리", `${mappedCount} / ${productCategories.length}`, "저장된 직접 매칭과 제품군 수")
+    comparisonMetricHtml("분류 완료 / 카테고리", `${mappedCount} / ${productCategories.length}`, "임시 분류를 제외한 직접 매칭과 제품군 수")
   ].join("");
 }
 
@@ -1125,8 +1125,8 @@ function renderMappingRows() {
     return { ...row, manualCategories, suggestions, review: mappingReview(manualCategories, suggestions) };
   }).sort(compareMappingPriority);
   const rows = prioritized.filter((row) => {
-    const mapped = row.manualCategories.length > 0;
-    if (filter === "review" && !row.review.needsReview) return false;
+    const mapped = row.review.priority === 3;
+    if (filter === "review" && !isMappingReviewTarget(row)) return false;
     if (filter === "mapped" && !mapped) return false;
     if (filter === "unmapped" && mapped) return false;
     if (filter === "new" && !row.appearanceType) return false;
@@ -1135,9 +1135,9 @@ function renderMappingRows() {
       || normalizeText(row.keyword).includes(search)
       || normalizeText([...row.manualCategories, ...row.suggestions].join(" ")).includes(search);
   });
-  const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
+  const mappedCount = prioritized.filter((row) => row.review.priority === 3).length;
 
-  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 판단 필요 ${prioritized.filter((row) => row.review.needsReview).length}개 · 직접 분류 ${mappedCount}개 · 분류 필요 → 복수 후보 → 추천 확인 → 분류 완료 순`;
+  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 우선 검토 ${prioritized.filter(isMappingReviewTarget).length}개 · 분류 완료 ${mappedCount}개 · 미확정 신규·재진입 → 불분명·기타·브랜드 등 → 나머지 검토 대상 → 분류 완료 순`;
   mappingBody.replaceChildren();
 
   if (!rows.length) {
@@ -1232,8 +1232,8 @@ function commitCategorySearch(keyword, slot, input, inputs) {
   const manual = manualCategoriesFor(keyword);
   if (reviewCell) reviewCell.innerHTML = mappingReviewHtml(mappingReview(manual, autoProductCategorySuggestionsFor(keyword)), manual.length > 0);
   renderMappingSummary();
-  const mappedCount = mappingRows.filter((row) => manualCategoriesFor(row.keyword).length).length;
-  mappingStatus.textContent = `총 ${mappingRows.length}개 · 직접 분류 ${mappedCount}개 · 저장 필요`;
+  const mappedCount = mappingRows.filter((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 3).length;
+  mappingStatus.textContent = `총 ${mappingRows.length}개 · 분류 완료 ${mappedCount}개 · 저장 필요`;
   mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
 }
 
@@ -1580,7 +1580,7 @@ function applyNewKeywordSuggestions() {
   mappingFilter.value = "review";
   renderMappingSummary();
   renderMappingRows();
-  mappingStatus.textContent = `${appliedCount}개 신규·재진입 키워드에 단일 추천을 적용했습니다. 추천 없음·복수 후보는 직접 확인해주세요. 변경사항 저장을 눌러 확정해주세요.`;
+  mappingStatus.textContent = `${appliedCount}개 신규·재진입 키워드에 단일 추천을 적용했습니다. 임시 분류·추천 없음·복수 후보는 직접 확인해주세요. 변경사항 저장을 눌러 확정해주세요.`;
   mappingApplySuggestionsButton.disabled = true;
 }
 

@@ -50,16 +50,35 @@ export function baseAutoProductCategoriesFor(keyword) {
 
 export function baseAutoProductCategoryFor(keyword) { return baseAutoProductCategoriesFor(keyword)[0]; }
 
+const PENDING_CATEGORIES = new Set(["불분명", "기타", "브랜드", "브랜드명", "미지정", "미분류", "미확정"]);
+
+function isPendingCategory(category) {
+  return PENDING_CATEGORIES.has(String(category || "").replace(/\s+/g, ""));
+}
+
 export function mappingReview(manualCategories, suggestions) {
+  const pending = manualCategories.filter(isPendingCategory);
+  if (pending.length) return { priority: 0, label: "재분류 필요", reason: `${pending.join(" · ")}로 지정되어 있습니다. 구체적인 제품군을 확인해주세요.`, needsReview: true, pendingCategory: true };
   if (manualCategories.length) return { priority: 3, label: "분류 완료", reason: "직접 지정한 카테고리가 있습니다.", needsReview: false };
-  const candidates = [...new Set(suggestions.filter((category) => !["기타", "미지정"].includes(category)))];
+  const candidates = [...new Set(suggestions.filter((category) => !isPendingCategory(category)))];
   if (!candidates.length) return { priority: 0, label: "분류 필요", reason: "자동 규칙으로 제품군을 특정하지 못했습니다.", needsReview: true };
   if (candidates.length > 1) return { priority: 1, label: "복수 후보", reason: `자동 규칙에서 ${candidates.length}개 후보가 나옵니다. 적용할 카테고리를 확인해주세요.`, needsReview: true };
   return { priority: 2, label: "추천 확인", reason: "단일 자동 추천이 있으며 아직 직접 지정하지 않았습니다.", needsReview: false };
 }
 
+export function isMappingReviewTarget(row) {
+  return row.review.needsReview || Boolean(row.appearanceType && row.review.priority !== 3);
+}
+
+function queuePriority(row) {
+  if (row.appearanceType && row.review.priority !== 3) return 0;
+  if (row.review.pendingCategory) return 1;
+  return row.review.needsReview ? 2 : row.review.priority === 2 ? 3 : 4;
+}
+
 export function compareMappingPriority(a, b) {
-  return a.review.priority - b.review.priority
+  return queuePriority(a) - queuePriority(b)
+    || a.review.priority - b.review.priority
     || String(b.latestEndDate || "").localeCompare(String(a.latestEndDate || ""))
     || Number(Boolean(b.appearanceType)) - Number(Boolean(a.appearanceType))
     || Number(a.latestRank || 9999) - Number(b.latestRank || 9999)

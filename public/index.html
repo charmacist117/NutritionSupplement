@@ -107,7 +107,7 @@
         <div class="mapping-header">
           <div>
             <h2>키워드별 카테고리 매칭</h2>
-            <p>자동 추천이 없거나 여러 제품군 후보가 겹치는 키워드부터 확인합니다. 직접 지정한 매칭은 엑셀 다운로드와 카테고리 집계에 우선 적용됩니다.</p>
+            <p>미확정 신규·재진입을 먼저 확인하고, 불분명·기타·브랜드 등의 임시 분류는 그다음에 계속 표시합니다. 구체적인 제품군으로 변경하면 검토 대상에서 빠집니다.</p>
           </div>
           <div class="mapping-actions">
             <button id="mapping-refresh-button" class="secondary-button" type="button">새로고침</button>
@@ -155,7 +155,7 @@
           <label>
             보기
             <select id="mapping-filter">
-              <option value="review" selected>판단 필요 · 추천 없음/복수 후보</option>
+              <option value="review" selected>우선 검토 · 신규/임시 분류/복수 후보</option>
               <option value="unmapped">미확정 전체</option>
               <option value="new">최신 신규·재진입</option>
               <option value="first">최초 등장</option>

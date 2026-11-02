@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "../public/comparisonPeriods.js";
-import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority } from "../public/categoryMappingReview.js";
+import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "../public/categoryMappingReview.js";
 
 const months = (start, count) => {
   const [year, month] = start.split("-").map(Number);
@@ -50,7 +50,7 @@ assert.deepEqual(baseAutoProductCategoriesFor("오메가3 마그네슘"), ["오�
 assert.equal(mappingReview([], ["기타"]).label, "분류 필요");
 assert.equal(mappingReview([], ["오메가3", "마그네슘"]).label, "복수 후보");
 assert.equal(mappingReview([], ["오메가3"]).label, "추천 확인");
-assert.equal(mappingReview(["기타"], ["기타"]).label, "분류 완료");
+assert.equal(mappingReview(["기타"], ["기타"]).label, "재분류 필요");
 assert.equal(mappingReview(["오메가3"], ["오메가3", "마그네슘"]).needsReview, false);
 assert.equal(mappingReview([], ["관절 건강", "관절 건강"]).needsReview, false);
 const queue = [
@@ -61,4 +61,21 @@ const queue = [
   { keyword: "최신 미분류", review: mappingReview([], ["미지정"]), latestEndDate: "2026-10-31", latestRank: 100 }
 ].sort(compareMappingPriority);
 assert.deepEqual(queue.map((row) => row.keyword), ["최신 미분류", "예전 미분류", "복수 후보", "단일 추천", "완료"]);
+for (const category of ["불분명", "기타", "브랜드", "브랜드명", "미지정", "미분류", "미확정"]) {
+  const pending = { review: mappingReview([category], ["오메가3"]), appearanceType: "" };
+  assert.equal(pending.review.pendingCategory, true, category);
+  assert.equal(isMappingReviewTarget(pending), true, `예전 ${category}도 계속 검토 대상`);
+}
+assert.equal(mappingReview(["오메가3", "불분명"], ["오메가3"]).needsReview, true);
+assert.equal(isMappingReviewTarget({ review: mappingReview(["오메가3"], ["오메가3"]), appearanceType: "first" }), false);
+const persistentQueue = [
+  { keyword: "기존 브랜드", review: mappingReview(["브랜드"], ["기타"]), latestEndDate: "2025-01-31" },
+  { keyword: "분류 완료 신규", review: mappingReview(["오메가3"], ["오메가3"]), appearanceType: "first" },
+  { keyword: "기존 복수 후보", review: mappingReview([], ["오메가3", "마그네슘"]), latestEndDate: "2026-10-31" },
+  { keyword: "자동 기타", review: mappingReview([], ["기타"]), latestEndDate: "2026-10-31" },
+  { keyword: "미확정 신규", review: mappingReview([], ["오메가3"]), appearanceType: "first", latestRank: 500 },
+  { keyword: "미확정 재진입", review: mappingReview([], ["마그네슘"]), appearanceType: "returning", latestRank: 10 }
+].sort(compareMappingPriority);
+assert.deepEqual(persistentQueue.map((row) => row.keyword), ["미확정 재진입", "미확정 신규", "기존 브랜드", "자동 기타", "기존 복수 후보", "분류 완료 신규"]);
+assert.deepEqual(persistentQueue.filter(isMappingReviewTarget).map((row) => row.keyword), ["미확정 재진입", "미확정 신규", "기존 브랜드", "자동 기타", "기존 복수 후보"]);
 console.log("arbitrary month ranges, ranking aggregation and category review priority checks ok");
