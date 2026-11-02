@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { normalizeAssignedCategories, categoryMappingRecord } from "../public/categoryAssignments.js";
 
 const MONTHLY_PREFIX = "monthly";
 const SETTINGS_PREFIX = "settings";
@@ -371,21 +372,10 @@ function normalizeKeywordCategoryMappings(input = {}) {
     const rawCategories = Array.isArray(item.categories)
       ? item.categories
       : [item.category, item.secondaryCategory];
-    const mappedCategories = [];
-
-    for (const value of rawCategories) {
-      const category = String(value || "").trim();
-      if (!category || mappedCategories.some((item) => normalizeMappingKey(item) === normalizeMappingKey(category))) continue;
-      mappedCategories.push(category);
-      if (mappedCategories.length === 2) break;
-    }
+    const mappedCategories = normalizeAssignedCategories(rawCategories);
     if (!keyword || !mappedCategories.length) continue;
 
-    byKeyword.set(normalizeMappingKey(keyword), {
-      keyword,
-      category: mappedCategories[0],
-      ...(mappedCategories[1] ? { secondaryCategory: mappedCategories[1] } : {})
-    });
+    byKeyword.set(normalizeMappingKey(keyword), categoryMappingRecord(keyword, mappedCategories));
   }
 
   return {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./checkCategoryAssignments.js";
 import { buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "../public/comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "../public/categoryMappingReview.js";
 

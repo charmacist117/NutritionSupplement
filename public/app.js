@@ -1,5 +1,6 @@
 import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "./comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "./categoryMappingReview.js";
+import { MAX_CATEGORY_ASSIGNMENTS, normalizeAssignedCategories, categoryMappingRecord } from "./categoryAssignments.js";
 
 const statusText = document.querySelector("#status");
 const monthList = document.querySelector("#month-list");
@@ -931,8 +932,7 @@ async function downloadReportXlsx(report) {
       "순위",
       "검색어",
       "일일 점수 평균",
-      "제품군 분류 1",
-      "제품군 분류 2",
+      ...Array.from({ length: MAX_CATEGORY_ASSIGNMENTS }, (_, index) => `제품군 분류 ${index + 1}`),
       "타깃 분류",
       "",
       "구분",
@@ -944,8 +944,7 @@ async function downloadReportXlsx(report) {
         row.rank,
         row.keyword,
         roundScore(row.dailyAverageRatio),
-        categories[0] || "",
-        categories[1] || "",
+        ...Array.from({ length: MAX_CATEGORY_ASSIGNMENTS }, (_, index) => categories[index] || ""),
         targetCategoryFor(row.keyword),
         "",
         aggregateCategories[index] || "",
@@ -1180,12 +1179,20 @@ function mappingReviewHtml(review, mapped) {
 function createCategorySearchGroup(keyword) {
   const group = document.createElement("div");
   group.className = "category-input-group";
-  const inputs = [0, 1].map((slot) => {
+  const inputs = [];
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "secondary-button compact-button category-add-slot";
+  addButton.textContent = "+ 카테고리 추가";
+  addButton.setAttribute("aria-label", `${keyword} 카테고리 입력 추가`);
+  group.append(addButton);
+  const addInput = () => {
+    const slot = inputs.length;
     const input = document.createElement("input");
     input.type = "search";
     input.className = "category-search-input";
     input.setAttribute("list", "mapping-category-options");
-    input.placeholder = slot === 0 ? "1차 카테고리 검색" : "2차 카테고리 검색";
+    input.placeholder = `${slot + 1}차 카테고리 검색`;
     input.setAttribute("aria-label", `${keyword} ${slot + 1}차 카테고리`);
 
     const commit = () => commitCategorySearch(keyword, slot, input, inputs);
@@ -1200,10 +1207,17 @@ function createCategorySearchGroup(keyword) {
       event.preventDefault();
       commit();
     });
-    return input;
+    inputs.push(input);
+    group.insertBefore(input, addButton);
+    addButton.hidden = inputs.length >= MAX_CATEGORY_ASSIGNMENTS;
+  };
+  for (let i = 0; i < Math.max(2, manualCategoriesFor(keyword).length); i++) addInput();
+  addButton.addEventListener("click", () => {
+    if (inputs.length >= MAX_CATEGORY_ASSIGNMENTS) return;
+    addInput();
+    syncCategorySearchInputs(keyword, inputs);
+    inputs.at(-1).focus();
   });
-
-  group.append(...inputs);
   syncCategorySearchInputs(keyword, inputs);
   return group;
 }
@@ -1218,8 +1232,7 @@ function commitCategorySearch(keyword, slot, input, inputs) {
   }
 
   const current = manualCategoriesFor(keyword);
-  const otherCategory = current[slot === 0 ? 1 : 0] || "";
-  if (category && category === otherCategory) {
+  if (category && current.some((value, index) => index !== slot && value === category)) {
     input.setCustomValidity("같은 카테고리를 두 번 지정할 수 없습니다.");
     input.reportValidity();
     return;
@@ -1463,26 +1476,6 @@ function mappingCategoriesFromItem(item) {
     ? item.categories
     : [item.category, item.secondaryCategory];
   return normalizeAssignedCategories(values.map(resolveCategoryName));
-}
-
-function normalizeAssignedCategories(categories) {
-  const result = [];
-  for (const value of categories || []) {
-    const category = String(value || "").trim();
-    if (!category || result.some((item) => normalizeText(item) === normalizeText(category))) continue;
-    result.push(category);
-    if (result.length === 2) break;
-  }
-  return result;
-}
-
-function categoryMappingRecord(keyword, categories) {
-  const normalized = normalizeAssignedCategories(categories);
-  return {
-    keyword,
-    category: normalized[0] || "",
-    ...(normalized[1] ? { secondaryCategory: normalized[1] } : {})
-  };
 }
 
 function productCategoriesFor(keyword) {
