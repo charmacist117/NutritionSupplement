@@ -541,6 +541,7 @@ button:disabled {
 
 .comparison-mode {
   display: inline-flex;
+  flex-wrap: wrap;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
@@ -1571,6 +1572,20 @@ button:disabled {
 
 .mapping-table-wrap {
   max-height: 680px;
+}
+
+.mapping-review-cell {
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.mapping-review-cell small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 .category-input-group {

@@ -1,3 +1,6 @@
+import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "./comparisonPeriods.js";
+import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority } from "./categoryMappingReview.js";
+
 const statusText = document.querySelector("#status");
 const monthList = document.querySelector("#month-list");
 const reportTitle = document.querySelector("#report-title");
@@ -54,6 +57,8 @@ const executiveCurrentPeriods = document.querySelector("#executive-current-perio
 const executiveReportStatus = document.querySelector("#executive-report-status");
 const comparisonModeButtons = [...document.querySelectorAll("[data-comparison-mode]")];
 const comparisonPeriodList = document.querySelector("#comparison-period-list");
+const comparisonPeriodLegend = document.querySelector("#comparison-period-legend");
+const comparisonPeriodHelp = document.querySelector("#comparison-period-help");
 const comparisonStatus = document.querySelector("#comparison-status");
 const comparisonSummary = document.querySelector("#comparison-summary");
 const comparisonRangeLabel = document.querySelector("#comparison-range-label");
@@ -145,13 +150,7 @@ const COMPARISON_SELECTION_STORAGE_KEY = "comparisonReportSelection";
 const COMPARISON_MODE_STORAGE_KEY = "comparisonMode";
 const CATEGORY_TREND_SELECTION_STORAGE_KEY = "categoryTrendSelection";
 const LATEST_RANK_CHANGE_THRESHOLD = 50;
-const MISSING_MONTH_RANK = 501;
-const COMPARISON_MODES = {
-  month: { label: "월별", monthCount: 1 },
-  quarter: { label: "분기별", monthCount: 3 },
-  half: { label: "반기별", monthCount: 6 },
-  year: { label: "연간", monthCount: 12 }
-};
+
 
 let selectedMonth = null;
 let currentReport = null;
@@ -170,6 +169,7 @@ let draggedReportKey = null;
 let comparisonSelectionLoaded = false;
 let comparisonSelectedKeys = new Set();
 let comparisonReports = [];
+let comparisonRenderVersion = 0;
 let comparisonCategoryRows = [];
 let comparisonKeywordRows = [];
 let comparisonLatestChanges = [];
@@ -256,7 +256,7 @@ statusSeriesAddButton.addEventListener("click", () => addTrendSeries());
 categoryKeywordSearch.addEventListener("input", () => renderCategoryKeywordRows());
 
 comparisonSelectAllButton.addEventListener("click", async () => {
-  comparisonSelectedKeys = new Set(reportKeys);
+  comparisonSelectedKeys = new Set(buildComparisonOptions(reportKeys, comparisonMode).map((option) => option.key));
   saveComparisonSelection();
   await renderComparisonSheet();
 });
@@ -332,6 +332,7 @@ for (const button of comparisonModeButtons) {
     if (!COMPARISON_MODES[nextMode] || nextMode === comparisonMode) return;
 
     comparisonMode = nextMode;
+    comparisonSelectionLoaded = false;
     localStorage.setItem(COMPARISON_MODE_STORAGE_KEY, comparisonMode);
     updateComparisonModeButtons();
     await renderComparisonSheet();
@@ -1045,7 +1046,7 @@ async function renderMappingSheet(options = {}) {
     newKeywordRows = [];
     renderMappingSummary();
     mappingStatus.textContent = "저장된 리포트가 없어 매칭할 키워드가 없습니다.";
-    mappingBody.innerHTML = `<tr><td colspan="6">저장된 리포트가 없습니다.</td></tr>`;
+    mappingBody.innerHTML = `<tr><td colspan="7">저장된 리포트가 없습니다.</td></tr>`;
     mappingApplySuggestionsButton.disabled = true;
     return;
   }
@@ -1061,7 +1062,7 @@ async function renderMappingSheet(options = {}) {
     renderMappingRows();
   } finally {
     mappingRefreshButton.disabled = false;
-    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoryFor(row.keyword));
+    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
   }
 }
 
@@ -1097,22 +1098,20 @@ function buildMappingRows(reports) {
     }
   }
 
-  return [...byKeyword.values()].sort((a, b) => {
-    const aMapped = manualCategoryFor(a.keyword) ? 1 : 0;
-    const bMapped = manualCategoryFor(b.keyword) ? 1 : 0;
-    return aMapped - bMapped || Number(a.latestRank || 9999) - Number(b.latestRank || 9999) || a.keyword.localeCompare(b.keyword, "ko");
-  });
+  return [...byKeyword.values()];
 }
 
 function renderMappingSummary() {
   const firstCount = newKeywordRows.filter((row) => row.appearanceType === "first").length;
   const returningCount = newKeywordRows.filter((row) => row.appearanceType === "returning").length;
   const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
+  const reviews = mappingRows.map((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)));
+  const neededCount = reviews.filter((review) => review.needsReview).length;
 
   mappingSummary.innerHTML = [
     comparisonMetricHtml("전체 키워드", `${mappingRows.length}개`, "저장 자료 전체의 고유 검색어"),
-    comparisonMetricHtml("최초 등장", `${firstCount}개`, "최신 자료에 처음 나타난 검색어"),
-    comparisonMetricHtml("재진입", `${returningCount}개`, "직전 자료에서 빠졌다가 다시 나타난 검색어"),
+    comparisonMetricHtml("판단 필요", `${neededCount}개`, "추천 없음 또는 복수 카테고리 후보"),
+    comparisonMetricHtml("신규·재진입", `${firstCount + returningCount}개`, `최초 등장 ${firstCount}개 · 재진입 ${returningCount}개`),
     comparisonMetricHtml("직접 분류 / 카테고리", `${mappedCount} / ${productCategories.length}`, "저장된 직접 매칭과 제품군 수")
   ].join("");
 }
@@ -1120,25 +1119,29 @@ function renderMappingSummary() {
 function renderMappingRows() {
   const search = normalizeText(mappingSearch.value);
   const filter = mappingFilter.value;
-  const rows = mappingRows.filter((row) => {
+  const prioritized = mappingRows.map((row) => {
     const manualCategories = manualCategoriesFor(row.keyword);
-    const suggestion = autoProductCategoryFor(row.keyword);
-    const mapped = manualCategories.length > 0;
+    const suggestions = autoProductCategorySuggestionsFor(row.keyword);
+    return { ...row, manualCategories, suggestions, review: mappingReview(manualCategories, suggestions) };
+  }).sort(compareMappingPriority);
+  const rows = prioritized.filter((row) => {
+    const mapped = row.manualCategories.length > 0;
+    if (filter === "review" && !row.review.needsReview) return false;
     if (filter === "mapped" && !mapped) return false;
     if (filter === "unmapped" && mapped) return false;
     if (filter === "new" && !row.appearanceType) return false;
     if ((filter === "first" || filter === "returning") && row.appearanceType !== filter) return false;
     return !search
       || normalizeText(row.keyword).includes(search)
-      || normalizeText([...manualCategories, suggestion].join(" ")).includes(search);
+      || normalizeText([...row.manualCategories, ...row.suggestions].join(" ")).includes(search);
   });
   const mappedCount = mappingRows.filter((row) => manualCategoryFor(row.keyword)).length;
 
-  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 직접 분류 ${mappedCount}개 · 신규·재진입 ${newKeywordRows.length}개`;
+  mappingStatus.textContent = `총 ${mappingRows.length}개 중 ${rows.length}개 표시 · 판단 필요 ${prioritized.filter((row) => row.review.needsReview).length}개 · 직접 분류 ${mappedCount}개 · 분류 필요 → 복수 후보 → 추천 확인 → 분류 완료 순`;
   mappingBody.replaceChildren();
 
   if (!rows.length) {
-    mappingBody.innerHTML = `<tr><td colspan="6">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    mappingBody.innerHTML = `<tr><td colspan="7">${filter === "review" && !search ? "우선 검토 대상이 없습니다. ‘미확정 전체’에서 단일 자동 추천을 확인할 수 있습니다." : "조건에 맞는 키워드가 없습니다."}</td></tr>`;
     return;
   }
 
@@ -1146,6 +1149,7 @@ function renderMappingRows() {
   for (const row of rows) {
     const tr = document.createElement("tr");
     const keywordCell = document.createElement("td");
+    const reviewCell = document.createElement("td");
     const appearanceCell = document.createElement("td");
     const monthCell = document.createElement("td");
     const rankCell = document.createElement("td");
@@ -1154,17 +1158,23 @@ function renderMappingRows() {
     const categoryInputs = createCategorySearchGroup(row.keyword);
 
     keywordCell.textContent = row.keyword;
+    reviewCell.className = "mapping-review-cell";
+    reviewCell.innerHTML = mappingReviewHtml(row.review, row.manualCategories.length > 0);
     appearanceCell.innerHTML = row.appearanceType ? newKeywordAppearanceBadge(row.appearanceType) : `<span class="muted-cell">-</span>`;
     monthCell.textContent = row.latestMonth || "-";
     rankCell.textContent = row.latestRank || "-";
-    suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(autoProductCategoryFor(row.keyword))}</span>`;
+    suggestionCell.innerHTML = `<span class="category-suggestion">${escapeHtml(row.suggestions.join(" · "))}</span>`;
     categoryCell.append(categoryInputs);
 
-    tr.append(keywordCell, appearanceCell, monthCell, rankCell, suggestionCell, categoryCell);
+    tr.append(keywordCell, reviewCell, appearanceCell, monthCell, rankCell, suggestionCell, categoryCell);
     fragment.append(tr);
   }
 
   mappingBody.append(fragment);
+}
+
+function mappingReviewHtml(review, mapped) {
+  return `<span class="assignment-badge ${review.needsReview ? "unmapped" : mapped ? "manual" : "automatic"}">${escapeHtml(review.label)}</span><small>${escapeHtml(review.reason)}</small>`;
 }
 
 function createCategorySearchGroup(keyword) {
@@ -1218,10 +1228,13 @@ function commitCategorySearch(keyword, slot, input, inputs) {
   input.setCustomValidity("");
   updateCategoryMapping(keyword, category, slot);
   syncCategorySearchInputs(keyword, inputs);
+  const reviewCell = input.closest("tr")?.querySelector(".mapping-review-cell");
+  const manual = manualCategoriesFor(keyword);
+  if (reviewCell) reviewCell.innerHTML = mappingReviewHtml(mappingReview(manual, autoProductCategorySuggestionsFor(keyword)), manual.length > 0);
   renderMappingSummary();
   const mappedCount = mappingRows.filter((row) => manualCategoriesFor(row.keyword).length).length;
   mappingStatus.textContent = `총 ${mappingRows.length}개 · 직접 분류 ${mappedCount}개 · 저장 필요`;
-  mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => !manualCategoriesFor(row.keyword).length);
+  mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
 }
 
 function syncCategorySearchInputs(keyword, inputs) {
@@ -1487,52 +1500,10 @@ function autoProductCategoryFor(keyword) {
   return productCategories.includes("기타") ? "기타" : "미지정";
 }
 
-function baseAutoProductCategoryFor(keyword) {
-  const kw = normalizeText(keyword);
-  const has = (term) => kw.includes(normalizeText(term));
-  const any = (terms) => terms.some(has);
-
-  if (has("오메가")) return "오메가3";
-  if (has("마그네슘")) return "마그네슘";
-  if (!any(["엘레나", "펨", "질", "구강"]) && any(["유산균", "락토핏", "프로바이오틱스", "드시모네", "자로우"])) return "유산균";
-  if (any(["프리바이오틱스", "푸룬", "낙산균"])) return "장 건강";
-  if (any(["비타민c", "압타민c"])) return "비타민c";
-  if (any(["비타민d", "비타민k"])) return "비타민dk";
-  if (any(["비타민", "비타", "오쏘몰", "센트룸"]) && !any(["비타민c", "압타민c", "비타민d", "비타민k"])) return "비타민 류";
-  if (any(["이뮨", "아연", "베타글루칸"])) return "면역 건강";
-  if (any(["콘드로이친", "msm", "난각막", "nem", "관절", "보스", "호관원", "옵티머스트", "우슬", "무브프리", "글루코사민"])) return "관절 건강";
-  if (any(["멜라토닌", "수면"])) return "수면 건강";
-  if (any(["루테인", "블루베리", "빌베리", "눈", "아스타잔틴"])) return "눈 건강";
-  if (has("글루타치온")) return "미백";
-  if (any(["nmn", "엔엠엔", "mnm"])) return "항노화";
-  if (any(["프로폴리스", "커큐민", "퀘르세틴", "브로멜라인", "강황", "테라큐민", "울금"])) return "항염증";
-  if (has("철분")) return "철분제";
-  if (any(["비오틴", "케라넷", "맥주"])) return "모발 건강";
-  if (has("효소")) return "효소식품";
-  if (any(["코엔자임", "코큐텐"])) return "코엔자임Q10";
-  if (any(["셀렌", "셀레늄"])) return "항산화";
-  if (any(["정관장", "홍삼", "에브리타임", "산삼", "장뇌삼", "홍이장군", "인삼"])) return "삼(蔘) 류";
-  if (any(["바나바", "뉴케어", "애사비"])) return "혈당";
-  if (any(["알부민", "펩티드"])) return "단백질";
-  if (any(["아르기닌", "마카", "쏘팔", "옥타", "전립", "장어", "카리토", "야관문"])) return "남성 건강";
-  if (any(["밀크씨슬", "밀크시슬", "간"])) return "간 건강";
-  if (any(["이노시톨", "엽산", "엘레나", "펨", "질"])) return "여성 건강";
-  if (any(["노인", "노년", "시니어", "실버", "어르신"])) return "노인 건강";
-  if (any(["도라지", "맥문동"])) return "호흡기 건강";
-  if (has("홍국")) return "콜레스테롤";
-  if (any(["폴리코사놀", "리놀렌산", "대마종자", "솔잎증류", "송침", "보라지", "콜레스테롤", "순환", "은행잎"])) return "혈행 건강";
-  if (has("갱년기")) return "갱년기 건강";
-  if (any(["매스틱", "감초"])) return "위 건강";
-  if (any(["포스파티딜", "테아닌", "홍경천", "뇌"])) return "뇌 건강";
-  if (has("꿀")) return "꿀";
-  if (has("흑염소")) return "수족냉증";
-  if (any(["베르베린", "bnr", "비에날", "비엔알", "알파cd"])) return "다이어트";
-  if (any(["숙취", "벌나무"])) return "숙취해소";
-  if (any(["칼마디", "mbp", "칼슘"])) return "뼈 건강";
-  if (any(["침향환", "경옥고", "공진단", "공진당"])) return "피로회복";
-  if (any(["삼백초", "노즈"])) return "코 건강";
-  if (any(["구강", "덴티"])) return "구강 건강";
-  return "기타";
+function autoProductCategorySuggestionsFor(keyword) {
+  const primary = autoProductCategoryFor(keyword);
+  if (["기타", "미지정"].includes(primary)) return [primary];
+  return [...new Set([primary, ...baseAutoProductCategoriesFor(keyword).map(resolveCategoryName).filter((category) => productCategories.includes(category))])];
 }
 
 function targetCategoryFor(keyword) {
@@ -1600,15 +1571,16 @@ function newKeywordAppearanceBadge(type) {
 function applyNewKeywordSuggestions() {
   let appliedCount = 0;
   for (const row of newKeywordRows) {
-    if (manualCategoryFor(row.keyword)) continue;
-    updateCategoryMapping(row.keyword, row.suggestion);
+    const suggestions = autoProductCategorySuggestionsFor(row.keyword);
+    if (mappingReview(manualCategoriesFor(row.keyword), suggestions).priority !== 2) continue;
+    updateCategoryMapping(row.keyword, suggestions[0]);
     appliedCount += 1;
   }
 
-  mappingFilter.value = "new";
+  mappingFilter.value = "review";
   renderMappingSummary();
   renderMappingRows();
-  mappingStatus.textContent = `${appliedCount}개 신규·재진입 키워드에 자동 추천을 적용했습니다. 변경사항 저장을 눌러 확정해주세요.`;
+  mappingStatus.textContent = `${appliedCount}개 신규·재진입 키워드에 단일 추천을 적용했습니다. 추천 없음·복수 후보는 직접 확인해주세요. 변경사항 저장을 눌러 확정해주세요.`;
   mappingApplySuggestionsButton.disabled = true;
 }
 
@@ -1993,23 +1965,24 @@ function saveTrendSeriesSelection() {
 }
 
 async function renderComparisonSheet(options = {}) {
+  const version = ++comparisonRenderVersion;
   initializeComparisonSelection();
   pruneComparisonSelection();
   if (!options.keepPeriodList) {
     renderComparisonPeriodList();
   }
 
-  const selectedKeys = chronologicalReportKeys(reportKeys.filter((key) => comparisonSelectedKeys.has(key)));
+  const selectedPeriods = buildComparisonOptions(reportKeys, comparisonMode).filter((option) => comparisonSelectedKeys.has(option.key));
+  const selectedKeys = chronologicalReportKeys([...new Set(selectedPeriods.flatMap((option) => option.reportKeys))]);
   const modeConfig = COMPARISON_MODES[comparisonMode];
-  const minimumSelection = modeConfig.monthCount * 2;
-  comparisonStatus.textContent = `${reportKeys.length}개 저장 자료 중 ${selectedKeys.length}개 선택 · ${modeConfig.label} 비교`;
+  comparisonStatus.textContent = `${selectedPeriods.length}개 기간 선택 · ${modeConfig.label} 비교`;
   comparisonDownloadButton.disabled = true;
   comparisonPdfDownloadButton.disabled = true;
 
-  if (selectedKeys.length < minimumSelection) {
+  if (selectedPeriods.length < 2) {
     const message = comparisonMode === "month"
       ? "비교할 기간을 2개 이상 선택해주세요."
-      : `${modeConfig.label} 비교에는 완전한 월 자료가 최소 ${minimumSelection}개 필요합니다.`;
+      : `비교할 ${modeConfig.label} 기간을 2개 이상 선택해주세요. 각 기간에는 연속된 ${modeConfig.monthCount}개월의 완전한 월 자료가 필요합니다.`;
     clearComparisonView(message);
     return;
   }
@@ -2018,12 +1991,13 @@ async function renderComparisonSheet(options = {}) {
   if (options.refreshReports) reportCache = new Map();
 
   const rawReports = (await Promise.all(selectedKeys.map((key) => fetchReport(key)))).filter(Boolean);
-  if (rawReports.length < minimumSelection) {
+  if (version !== comparisonRenderVersion) return;
+  if (rawReports.length !== selectedKeys.length) {
     clearComparisonView("선택한 자료 중 일부를 불러오지 못했습니다.");
     return;
   }
 
-  const grouped = buildComparisonPeriods(rawReports, comparisonMode);
+  const grouped = buildComparisonPeriods(rawReports, comparisonMode, selectedPeriods.map((option) => option.key));
   const reports = grouped.periods;
   if (reports.length < 2) {
     clearComparisonView(`${modeConfig.label}로 완성되는 비교 기간이 2개 미만입니다. ${grouped.note}`.trim());
@@ -2068,155 +2042,11 @@ function updateComparisonModeButtons() {
   }
 }
 
-function comparisonMethodText(mode = comparisonMode) {
-  if (mode === "month") {
-    return "월별 저장 자료의 검색 순위를 직접 비교하며 기간별 상대 점수는 사용하지 않습니다.";
-  }
-
-  const config = COMPARISON_MODES[mode];
-  return `${config.monthCount}개 구성 월의 검색 순위를 평균합니다. 해당 월에 없는 키워드는 501위로 반영한 뒤 묶음 기간 안에서 다시 1~500위 순위를 부여하며 상대 점수는 사용하지 않습니다.`;
-}
-
-function buildComparisonPeriods(reports, mode) {
-  const sortedReports = [...reports].sort((a, b) => reportEndDate(a).localeCompare(reportEndDate(b)));
-  if (mode === "month") {
-    return {
-      periods: sortedReports,
-      note: "월별 검색 순위 기준 · 상대 점수 미사용"
-    };
-  }
-
-  const monthReports = new Map();
-  let excludedCount = 0;
-  for (const report of sortedReports) {
-    const monthInfo = completeCalendarMonthInfo(report);
-    if (!monthInfo) {
-      excludedCount += 1;
-      continue;
-    }
-    monthReports.set(monthInfo.monthKey, report);
-  }
-
-  const groupDefinitions = new Map();
-  for (const monthKey of monthReports.keys()) {
-    const definition = comparisonGroupDefinition(monthKey, mode);
-    if (definition) groupDefinitions.set(definition.key, definition);
-  }
-
-  const periods = [];
-  let incompleteCount = 0;
-  for (const definition of [...groupDefinitions.values()].sort((a, b) => a.startDate.localeCompare(b.startDate))) {
-    const sourceReports = definition.monthKeys.map((monthKey) => monthReports.get(monthKey));
-    if (sourceReports.some((report) => !report)) {
-      incompleteCount += 1;
-      continue;
-    }
-    periods.push(aggregateRankingPeriod(definition, sourceReports));
-  }
-
-  const notes = [`완성된 ${COMPARISON_MODES[mode].label} ${periods.length}개`];
-  if (incompleteCount) notes.push(`월이 빠진 묶음 ${incompleteCount}개 제외`);
-  if (excludedCount) notes.push(`완전한 달력 월이 아닌 자료 ${excludedCount}개 제외`);
-  notes.push("상대 점수 미사용");
-  return { periods, note: notes.join(" · ") };
-}
-
-function completeCalendarMonthInfo(report) {
-  const startDate = String(report.startDate || "");
-  const endDate = String(report.endDate || "");
-  const match = startDate.match(/^(\d{4})-(\d{2})-01$/);
-  if (!match) return null;
-
-  const monthKey = `${match[1]}-${match[2]}`;
-  if (endDate !== lastDayOfMonth(monthKey)) return null;
-  return { monthKey, year: Number(match[1]), month: Number(match[2]) };
-}
-
-function comparisonGroupDefinition(monthKey, mode) {
-  const match = String(monthKey).match(/^(\d{4})-(\d{2})$/);
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  let startMonth;
-  let monthCount;
-  let key;
-  let label;
-
-  if (mode === "quarter") {
-    const quarter = Math.floor((month - 1) / 3) + 1;
-    startMonth = (quarter - 1) * 3 + 1;
-    monthCount = 3;
-    key = `${year}-Q${quarter}`;
-    label = `${year}년 ${quarter}분기`;
-  } else if (mode === "half") {
-    const half = month <= 6 ? 1 : 2;
-    startMonth = half === 1 ? 1 : 7;
-    monthCount = 6;
-    key = `${year}-H${half}`;
-    label = `${year}년 ${half === 1 ? "상반기" : "하반기"}`;
-  } else if (mode === "year") {
-    startMonth = 1;
-    monthCount = 12;
-    key = String(year);
-    label = `${year}년`;
-  } else {
-    return null;
-  }
-
-  const monthKeys = Array.from({ length: monthCount }, (_, index) => `${year}-${String(startMonth + index).padStart(2, "0")}`);
-  const startDate = `${monthKeys[0]}-01`;
-  const endDate = lastDayOfMonth(monthKeys[monthKeys.length - 1]);
-  return { key, label, monthKeys, startDate, endDate };
-}
-
-function aggregateRankingPeriod(definition, sourceReports) {
-  const reportMaps = sourceReports.map((report) => new Map(
-    (report.rows || [])
-      .map((row) => [normalizeText(row.keyword), row])
-      .filter(([key]) => key)
-  ));
-  const keys = new Set(reportMaps.flatMap((rows) => [...rows.keys()]));
-  const rankedRows = [...keys].map((key) => {
-    const points = reportMaps.map((rows) => rows.get(key) || null);
-    const ranks = points.map((row) => row ? Number(row.rank) : MISSING_MONTH_RANK);
-    const keyword = [...points].reverse().find(Boolean)?.keyword || key;
-    return {
-      keyword,
-      averageMonthlyRank: ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length,
-      presentMonthCount: points.filter(Boolean).length,
-      latestMonthlyRank: Number([...points].reverse().find(Boolean)?.rank || MISSING_MONTH_RANK)
-    };
-  }).sort((a, b) =>
-    a.averageMonthlyRank - b.averageMonthlyRank
-    || b.presentMonthCount - a.presentMonthCount
-    || a.latestMonthlyRank - b.latestMonthlyRank
-    || a.keyword.localeCompare(b.keyword, "ko")
-  ).slice(0, 500).map((row, index) => ({
-    rank: index + 1,
-    keyword: row.keyword,
-    dailyAverageRatio: 0,
-    averageMonthlyRank: Number(row.averageMonthlyRank.toFixed(3)),
-    presentMonthCount: row.presentMonthCount
-  }));
-
-  return {
-    month: definition.key,
-    comparisonLabel: definition.label,
-    startDate: definition.startDate,
-    endDate: definition.endDate,
-    count: rankedRows.length,
-    rows: rankedRows,
-    sourceMonthCount: sourceReports.length,
-    categoryPath: sourceReports.at(-1)?.categoryPath || []
-  };
-}
-
 function initializeComparisonSelection() {
   if (comparisonSelectionLoaded) return;
   comparisonSelectionLoaded = true;
 
-  const saved = localStorage.getItem(COMPARISON_SELECTION_STORAGE_KEY);
+  const saved = localStorage.getItem(comparisonSelectionStorageKey());
   if (saved !== null) {
     try {
       const keys = JSON.parse(saved);
@@ -2227,12 +2057,18 @@ function initializeComparisonSelection() {
     }
   }
 
-  const chronological = chronologicalReportKeys(reportKeys);
-  comparisonSelectedKeys = new Set(chronological.slice(-2));
+  if (comparisonMode === "month") {
+    comparisonSelectedKeys = new Set(chronologicalReportKeys(reportKeys).slice(-2));
+  } else {
+    const periods = buildComparisonOptions(reportKeys, comparisonMode);
+    const latest = periods.at(-1);
+    const previous = latest && (periods.findLast((option) => option.endDate < latest.startDate) || periods.at(-2));
+    comparisonSelectedKeys = new Set([previous, latest].filter(Boolean).map((option) => option.key));
+  }
 }
 
 function pruneComparisonSelection() {
-  const validKeys = new Set(reportKeys);
+  const validKeys = new Set(buildComparisonOptions(reportKeys, comparisonMode).map((option) => option.key));
   const nextKeys = [...comparisonSelectedKeys].filter((key) => validKeys.has(key));
   if (nextKeys.length === comparisonSelectedKeys.size) return;
 
@@ -2241,19 +2077,33 @@ function pruneComparisonSelection() {
 }
 
 function saveComparisonSelection() {
-  localStorage.setItem(COMPARISON_SELECTION_STORAGE_KEY, JSON.stringify([...comparisonSelectedKeys]));
+  localStorage.setItem(comparisonSelectionStorageKey(), JSON.stringify([...comparisonSelectedKeys]));
+}
+
+function comparisonSelectionStorageKey() {
+  return comparisonMode === "month" ? COMPARISON_SELECTION_STORAGE_KEY : `${COMPARISON_SELECTION_STORAGE_KEY}:${comparisonMode}`;
 }
 
 function renderComparisonPeriodList() {
   comparisonPeriodList.replaceChildren();
+  comparisonPeriodLegend.textContent = comparisonMode === "month" ? "비교에 사용할 저장 자료" : `비교할 ${COMPARISON_MODES[comparisonMode].label} 기간`;
+  comparisonPeriodHelp.textContent = comparisonMode === "month" ? "비교할 저장 자료를 선택하세요."
+    : comparisonMode === "year" ? "각 연도 1~12월 전체를 묶어 비교합니다."
+    : `원하는 시작월의 연속 ${COMPARISON_MODES[comparisonMode].monthCount}개월 기간을 각각 선택하세요. 서로 겹치는 기간도 비교할 수 있습니다.`;
 
   if (!reportKeys.length) {
     comparisonPeriodList.innerHTML = `<p class="empty">저장된 자료가 없습니다.</p>`;
     return;
   }
 
+  const periods = buildComparisonOptions(reportKeys, comparisonMode);
+  if (!periods.length) {
+    comparisonPeriodList.innerHTML = `<p class="empty">${COMPARISON_MODES[comparisonMode].label}로 묶을 연속된 완전한 월 자료가 없습니다.</p>`;
+    return;
+  }
   const fragment = document.createDocumentFragment();
-  for (const key of reportKeys) {
+  for (const option of comparisonMode === "month" ? periods : periods.toReversed()) {
+    const key = option.key;
     const label = document.createElement("label");
     const input = document.createElement("input");
     const text = document.createElement("span");
@@ -2262,7 +2112,7 @@ function renderComparisonPeriodList() {
     input.type = "checkbox";
     input.dataset.reportKey = key;
     input.checked = comparisonSelectedKeys.has(key);
-    text.textContent = periodLabel(key);
+    text.textContent = option.label || periodLabel(key);
     label.append(input, text);
     fragment.append(label);
   }
