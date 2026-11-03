@@ -289,7 +289,10 @@ async function fetchProductList(session, condition, keyword = " ", { foodCategor
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
   });
-  const count = await requestProductList(session, "searchPrdListCnt_1", body);
+  const [count, firstPage] = await Promise.all([
+    requestProductList(session, "searchPrdListCnt_1", body),
+    general ? requestProductList(session, "searchPrdList_1", body) : null
+  ]);
   if (count.totCnt === null || count.totCnt === undefined || count.totCnt === "" || !Number.isSafeInteger(Number(count.totCnt)) || Number(count.totCnt) < 0) {
     throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
   }
@@ -297,7 +300,13 @@ async function fetchProductList(session, condition, keyword = " ", { foodCategor
   if (general) checkGeneralFoodCount(expected);
   const pages = [];
   const pageCount = Math.ceil(expected / pageSize);
-  let cursor = 0;
+  if (general) {
+    if (!Array.isArray(firstPage?.prdList) || firstPage.prdList.length !== Math.min(pageSize, expected)) {
+      throw new Error("식품안전나라 일반식품 첫 페이지 건수가 일치하지 않습니다. 다시 검색해주세요.");
+    }
+    if (pageCount) pages[0] = firstPage.prdList;
+  }
+  let cursor = general ? 1 : 0;
   let failure;
   await Promise.all(Array.from({ length: Math.min(3, pageCount) }, async () => {
     while (cursor < pageCount && !failure) {

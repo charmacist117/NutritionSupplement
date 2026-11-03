@@ -195,7 +195,8 @@ try {
   generalRows = Array.from({ length: 20001 }, (_, i) => ({ ...raw(i, "초대형결과", "캔디류"), PREFIX_PRDLST_CD: "C" }));
   const beforeBroad = sourceRequests.length;
   await assert.rejects(searchGeneralFoodsLive({ query: "초대형결과" }), { status: 422 });
-  assert.ok(sourceRequests.slice(beforeBroad).every((request) => request.endpoint.endsWith("searchPrdListCnt_1.do")));
+  assert.equal(sourceRequests.slice(beforeBroad).length, 2);
+  assert.ok(sourceRequests.slice(beforeBroad).every((request) => request.page === "1"));
   restrictedDetail = false;
   timeoutSource = true;
   await handler({ method: "GET", query: {} }, response);
