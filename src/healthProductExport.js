@@ -4,7 +4,7 @@ import { loadProductTypeCatalog, searchHealthProducts } from "./productTypeCatal
 export async function getHealthProductExport(options = {}) {
   const [result, catalog] = await Promise.all([
     searchHealthProducts({ ...options, page: 1, allResults: true }),
-    (options.target || "name") === "name" ? loadProductTypeCatalog() : null
+    options.foodCategory !== "general" && (options.target || "name") === "name" ? loadProductTypeCatalog() : null
   ]);
   if (catalog) {
     const byReport = new Map(catalog.items.map((item) => [item.reportNumber || item.id, item]));

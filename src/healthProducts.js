@@ -5,6 +5,40 @@ const ORIGIN = "https://www.foodsafetykorea.go.kr";
 export const HEALTH_PRODUCTS_SOURCE_URL = `${ORIGIN}/portal/specialinfo/searchInfoProduct.do`;
 export const HEALTH_PRODUCT_CHUNK_SIZE = 500;
 export const HEALTH_PRODUCT_PAGE_SIZE = 20;
+const generalFoodCache = new Map();
+
+function checkGeneralFoodCount(count) {
+  // shortcut: 일반식품 전수 수집은 별도 색인이 필요하므로 넓은 조회를 제한한다.
+  if (count <= 20000) return;
+  const error = new Error("일반식품 조회 범위가 20,000건을 초과합니다. 더 구체적인 제품명이나 업체명으로 검색해주세요.");
+  error.status = 422; throw error;
+}
+
+export async function searchGeneralFoodsLive({ page = 1, query = "", target = "name", company = "", includeExport = true, allResults = false } = {}) {
+  if (!["name", "types", "ingredients", "all"].includes(target)) throw queryError();
+  const expression = parseBooleanQuery(query);
+  const keywords = company.trim() ? [company.trim()] : sourceSearchKeywords(expression, true);
+  if (!keywords?.length || keywords.length > 4) {
+    const error = new Error("일반식품은 제품명·품목유형의 포함 단어 또는 업체명을 입력해주세요. 전체 목록이나 제외 조건만으로는 조회할 수 없습니다.");
+    error.status = 400; throw error;
+  }
+  const key = JSON.stringify({ keywords, target: company.trim() ? "name" : target });
+  let entry = generalFoodCache.get(key);
+  if (!entry || Date.now() - entry.createdAt > 120000) {
+    const index = await fetchHealthProductIndex({ keywords, foodCategory: "general", target: company.trim() ? "name" : target });
+    entry = { index, createdAt: Date.now() };
+    if (generalFoodCache.size >= 5) generalFoodCache.delete(generalFoodCache.keys().next().value);
+    generalFoodCache.set(key, entry);
+  }
+  const index = entry.index;
+  const textRows = index.items.map((item) => ({ id: item.id, ingredients: target === "name" ? item.name : target === "all" ? `${item.name} | ${item.type}` : item.type }));
+  const matchedIds = filterHealthProductSearchRows(textRows, query);
+  const result = pageHealthProducts(index, [], { page, matchedIds, company, includeExport, allResults });
+  return { page: result.page, pageSize: result.pageSize, total: result.total, totalPages: result.totalPages,
+    items: result.items.map((item) => ({ ...item, foodCategory: "general" })), indexedTotal: index.total,
+    fetchedAt: index.syncedAt, sourceUrl: index.sourceUrl, typesComplete: true, foodCategory: "general",
+    searchBasis: target === "name" ? "일반식품 제품명" : target === "all" ? "일반식품 제품명·품목유형" : "일반식품 품목유형" };
+}
 
 export async function searchHealthProductsLive({ page = 1, query = "", target = "name", company = "", includeExport = true, allResults = false } = {}) {
   if (!["name", "ingredients", "all"].includes(target)) {
@@ -25,15 +59,16 @@ export async function searchHealthProductsLive({ page = 1, query = "", target = 
   };
 }
 
-function sourceSearchKeywords(node) {
+function sourceSearchKeywords(node, wholeTerm = false) {
   if (!node || node.type === "NOT") return null;
   // 한 글자로 후보를 좁히면 ‘더파르마’와 ‘더 파르마’를 모두 유지할 수 있다.
   if (node.type === "TERM") {
+    if (wholeTerm) return [node.sourceValue || node.value];
     const letter = node.value.match(/[가-힣]/)?.[0];
     return letter ? [letter] : null;
   }
-  const left = sourceSearchKeywords(node.left);
-  const right = sourceSearchKeywords(node.right);
+  const left = sourceSearchKeywords(node.left, wholeTerm);
+  const right = sourceSearchKeywords(node.right, wholeTerm);
   if (node.type === "AND") return !left ? right : !right ? left : left.length <= right.length ? left : right;
   return left && right ? [...new Set([...left, ...right])] : null;
 }
@@ -57,12 +92,18 @@ export async function fetchHealthProductTypesLive(ids) {
   return { items: details.map((item) => ({ id: item.id, allTypes: item.allTypes || "", typeError: item.detailError || "" })) };
 }
 
-export async function fetchHealthProductIndex({ keywords = null } = {}) {
+export async function fetchHealthProductIndex({ keywords = null, foodCategory = "health", target = "name" } = {}) {
   const session = await openSession();
   const included = [];
   let excluded = [];
   if (keywords?.length) {
-    for (const keyword of keywords) included.push(...await fetchProductList(session, "I", keyword));
+    for (const keyword of keywords) {
+      const targets = foodCategory === "general" && target === "all" ? ["name", "types"] : [target];
+      for (const searchTarget of targets) {
+        included.push(...await fetchProductList(session, "I", keyword, { foodCategory, target: searchTarget }));
+        if (foodCategory === "general") checkGeneralFoodCount(new Set(included.map((item) => item.PRDLST_REPORT_LEDG_NO)).size);
+      }
+    }
   } else {
     const lists = await Promise.allSettled([fetchProductList(session, "I"), fetchProductList(session, "E")]);
     const failed = lists.find((result) => result.status === "rejected");
@@ -236,12 +277,14 @@ async function openSession() {
   return { callPage, cookie: cookies.join("; ") };
 }
 
-async function fetchProductList(session, condition, keyword = " ") {
+async function fetchProductList(session, condition, keyword = " ", { foodCategory = "health", target = "name" } = {}) {
+  const general = foodCategory === "general";
+  const typeSearch = general && target !== "name";
   const pageSize = 2000;
   const body = new URLSearchParams({
-    s_mode: "1", s_opt: "all", s_induty_cd: "131,132", s_prdlst_grp: "E0000000000000",
+    s_mode: "1", s_opt: "all", s_induty_cd: general ? "106,402" : "131,132", s_prdlst_grp: general ? "C0000000000000" : "E0000000000000",
     s_prdlst_cd: "all", s_bsn_nm: "", s_prd_nm: "", s_prdlst_report_no: "",
-    s_opt1: condition, s_keyword1: keyword, s_opt2: "Y", s_opt3: "0", s_keyword2: "",
+    s_opt1: condition, s_keyword1: typeSearch ? "" : keyword, prd_cd_nm: typeSearch ? keyword : "", s_opt2: "Y", s_opt3: "0", s_keyword2: "",
     s_order_by: "prdlst_nm", s_list_cnt: String(pageSize), s_page_num: "1", s_prefix: "",
     s_halal_yn: "", s_highlow_yn: "", s_dsp_yn: "", s_child_yn: "", s_tx_id: "1",
     s_bar_cd: "", callPage: session.callPage
@@ -251,6 +294,7 @@ async function fetchProductList(session, condition, keyword = " ") {
     throw new Error("식품안전나라 전체 건수 형식이 변경되었습니다.");
   }
   const expected = Number(count.totCnt);
+  if (general) checkGeneralFoodCount(expected);
   const pages = [];
   const pageCount = Math.ceil(expected / pageSize);
   let cursor = 0;
@@ -273,7 +317,7 @@ async function fetchProductList(session, condition, keyword = " ") {
   if (failure) throw failure;
   const rows = pages.flat();
   // E분류 검색에도 식품(001) 기록이 있어 목록의 품목분류 코드로 검증한다.
-  if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || !String(row.PREFIX_PRDLST_CD || row.PRDLST_CD || "").startsWith("E"))
+  if (rows.some((row) => typeof row.PRDLST_REPORT_LEDG_NO !== "string" || !row.PRDLST_REPORT_LEDG_NO || !String(row.PREFIX_PRDLST_CD || row.PRDLST_CD || "").startsWith(general ? "C" : "E"))
     || new Set(rows.map((row) => row.PRDLST_REPORT_LEDG_NO)).size !== expected) {
     throw new Error("식품안전나라 제품 ID·분류·중복 검증에 실패했습니다. 다시 수집해주세요.");
   }
@@ -344,7 +388,7 @@ function parseBooleanQuery(query) {
   const raw = [...source.matchAll(/"([^"]+)"|'([^']+)'|\(|\)|\bAND\b|\bOR\b|\bNOT\b|[^\s()]+/gi)].map((match) => {
     const value = match[1] || match[2] || match[0];
     const upper = value.toUpperCase();
-    return ["AND", "OR", "NOT"].includes(upper) ? { type: upper } : value === "(" ? { type: "(" } : value === ")" ? { type: ")" } : { type: "TERM", value: searchKey(value) };
+    return ["AND", "OR", "NOT"].includes(upper) ? { type: upper } : value === "(" ? { type: "(" } : value === ")" ? { type: ")" } : { type: "TERM", value: searchKey(value), sourceValue: value };
   });
   const tokens = [];
   for (const token of raw) {

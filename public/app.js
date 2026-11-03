@@ -83,6 +83,7 @@ const ingredientsPrevButton = document.querySelector("#ingredients-prev");
 const ingredientsNextButton = document.querySelector("#ingredients-next");
 const ingredientsPage = document.querySelector("#ingredients-page");
 const productsSearchForm = document.querySelector("#products-search-form");
+const productsFoodCategory = document.querySelector("#products-food-category");
 const productsQuery = document.querySelector("#products-query");
 const productsCompany = document.querySelector("#products-company");
 const productsSearchTarget = document.querySelector("#products-search-target");
@@ -194,6 +195,7 @@ let healthState = {
 };
 
 setPreviousMonthDates();
+updateProductFoodCategory();
 updateComparisonModeButtons();
 
 for (const button of tabButtons) {
@@ -325,6 +327,13 @@ productsSearchForm.addEventListener("submit", async (event) => {
 productsPrevButton.addEventListener("click", () => loadProducts(productsCurrentPage - 1));
 productsNextButton.addEventListener("click", () => loadProducts(productsCurrentPage + 1));
 productsDownloadButton.addEventListener("click", downloadProductsXlsx);
+productsFoodCategory.addEventListener("change", () => {
+  updateProductFoodCategory();
+  productRows.clear();
+  productsBody.innerHTML = '<tr><td colspan="8">검색 조건을 입력하고 검색하세요.</td></tr>';
+  productsStatus.textContent = productsFoodCategory.value === "general" ? "일반식품은 검색어 또는 업체명을 입력하세요." : "검색 조건을 입력하세요. 비워 두고 검색하면 전체 목록을 조회합니다.";
+  productsPage.textContent = "1 / 1";
+});
 productsSearchForm.addEventListener("input", () => {
   productsRequest?.abort();
   productsDownloadRequest?.abort();
@@ -601,6 +610,21 @@ async function loadIngredients(page) {
   }
 }
 
+function updateProductFoodCategory() {
+  const general = productsFoodCategory.value === "general";
+  productsSearchForm.closest(".products-panel").classList.toggle("products-general", general);
+  document.querySelector("#products-title").textContent = general ? "일반식품 검색 · 국내 가공식품" : "건강기능식품 검색";
+  document.querySelector("#products-description").textContent = general
+    ? "공식 가공식품 목록에서 제품명과 품목유형을 검색합니다. 원재료는 제품 상세에서 확인하세요."
+    : "제품명은 실시간 조회하고, 품목 총 유형은 공식 신고자료의 전체 기능지표성분으로 검색합니다. 제품 상세는 실시간으로 확인합니다.";
+  productsSearchTarget.querySelector('[value="types"]').textContent = general ? "품목유형" : "품목 총 유형";
+  productsSearchTarget.querySelector('[value="all"]').textContent = general ? "제품명 + 품목유형" : "제품명 + 품목 총 유형";
+  productsQuery.placeholder = general ? "홍삼젤리 또는 캔디류" : "오메가3 AND 비타민D";
+  document.querySelector("#products-query-help").textContent = general
+    ? "AND·OR·NOT과 괄호·따옴표를 사용할 수 있습니다. 제품명·품목유형·업체명의 포함 조건을 입력하세요. 넓은 조회는 20,000건까지이며, 후보 목록은 2분간 유지됩니다. 일반식품의 원재료는 상세에서 확인할 수 있습니다."
+    : 'AND는 모두 포함, OR는 하나 이상 포함, NOT은 제외하며 괄호와 따옴표를 사용할 수 있습니다. 예: 마그네슘 AND "비타민 D" · 업체명은 검색식과 함께 적용됩니다. 품목 총 유형은 각 제품 상세표의 유형 전체를 검색합니다. 전체 성분·원료는 상세 버튼으로 확인하세요.';
+}
+
 async function loadProducts(page = 1) {
   productsRequest?.abort();
   productsDownloadRequest?.abort();
@@ -609,13 +633,13 @@ async function loadProducts(page = 1) {
   productsDownloadStatus.textContent = "";
   const controller = new AbortController();
   productsRequest = controller;
-  productsStatus.textContent = productsSearchTarget.value === "name" ? "식품안전나라에서 최신 제품 목록을 조회하는 중입니다." : "전체 상세 유형 자료에서 검색하는 중입니다.";
+  productsStatus.textContent = productsFoodCategory.value === "general" || productsSearchTarget.value === "name" ? "식품안전나라에서 제품 목록을 조회하는 중입니다." : "전체 상세 유형 자료에서 검색하는 중입니다.";
   productsPage.textContent = "조회 중";
   productsBody.innerHTML = '<tr><td colspan="8">제품 목록을 불러오는 중입니다.</td></tr>';
   productRows.clear();
   productsPrevButton.disabled = true;
   productsNextButton.disabled = true;
-  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), company: productsCompany.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked) });
+  const params = new URLSearchParams({ page: String(Math.max(1, page)), q: productsQuery.value.trim(), company: productsCompany.value.trim(), target: productsSearchTarget.value, includeExport: String(productsIncludeExport.checked), foodCategory: productsFoodCategory.value });
   try {
     const response = await fetch(`/api/health-products?${params}`, { cache: "no-store", signal: controller.signal });
     const data = await response.json().catch(() => ({ error: "조회 응답을 받지 못했습니다. 잠시 후 다시 검색해주세요." }));
@@ -637,7 +661,7 @@ async function loadProducts(page = 1) {
     productsPage.textContent = `${data.page} / ${data.totalPages}`;
     productsPrevButton.disabled = data.page <= 1;
     productsNextButton.disabled = data.page >= data.totalPages;
-    if (data.items.length && !data.catalogBuiltAt) {
+    if (data.items.length && !data.catalogBuiltAt && !data.typesComplete) {
       // 목록 요청과 분리해 현재 페이지의 상세 유형을 서버리스 실행 시간 안에 조회한다.
       productsStatus.textContent += " · 품목 총 유형 조회 중";
       try {
@@ -690,9 +714,9 @@ async function downloadProductsXlsx() {
     if (!response.ok) throw new Error(data.error || "검색 결과를 다운로드하지 못했습니다.");
     if (!Array.isArray(data.items) || data.items.length !== data.total) throw new Error("전체 검색 결과가 누락되어 다운로드를 중단했습니다.");
     if (productsDownloadRequest !== controller) return;
-    const rows = [["제품명", "업체명", "품목보고번호", "품목유형", "품목 총 유형", "소비기한", "내수/수출", "생산종료 여부", "전체 유형 확인일시"],
-      ...data.items.map((item) => [item.name, item.company, item.reportNumber, item.type,
-        typeof item.allTypes === "string" ? item.allTypes || "원문 미기재" : "미확인",
+    const rows = [["식품 구분", "제품명", "업체명", "품목보고번호", "품목유형", "품목 총 유형", "소비기한", "내수/수출", "생산종료 여부", "전체 유형 확인일시"],
+      ...data.items.map((item) => [item.foodCategory === "general" ? "일반식품" : "건강기능식품", item.name, item.company, item.reportNumber, item.type,
+        item.foodCategory === "general" ? "해당 없음(일반식품)" : typeof item.allTypes === "string" ? item.allTypes || "원문 미기재" : "미확인",
         item.shelfLife, item.domesticExport,
         typeof item.productionEnded === "boolean" ? item.productionEnded ? "생산종료" : "아니오" : "원문 미제공",
         item.typesFetchedAt || ""])
@@ -702,13 +726,13 @@ async function downloadProductsXlsx() {
     const link = document.createElement("a");
     link.href = url;
     const keywordFileName = (params.get("q") || "전체").replace(/[^\p{L}\p{N}._-]+/gu, "_").slice(0, 60);
-    link.download = `건강기능식품_${keywordFileName}_${formatDate(new Date())}.xlsx`;
+    link.download = `${params.get("foodCategory") === "general" ? "일반식품" : "건강기능식품"}_${keywordFileName}_${formatDate(new Date())}.xlsx`;
     document.body.append(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    const unchecked = data.items.filter((item) => typeof item.allTypes !== "string").length;
-    productsDownloadStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 엑셀 다운로드 완료 · 전체 유형은 ${data.catalogBuiltAt ? new Date(data.catalogBuiltAt).toLocaleString("ko-KR") : "저장 자료"} 기준${unchecked ? ` · 전체 유형 미확인 ${unchecked}건` : ""}`;
+    const unchecked = data.items.filter((item) => item.foodCategory !== "general" && typeof item.allTypes !== "string").length;
+    productsDownloadStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 엑셀 다운로드 완료${data.foodCategory === "general" ? " · 일반식품 품목유형 기준" : ` · 전체 유형은 ${data.catalogBuiltAt ? new Date(data.catalogBuiltAt).toLocaleString("ko-KR") : "저장 자료"} 기준`}${unchecked ? ` · 전체 유형 미확인 ${unchecked}건` : ""}`;
   } catch (error) {
     if (!controller.signal.aborted) productsDownloadStatus.textContent = error.message || "다운로드에 실패했습니다. 다시 시도해주세요.";
   } finally {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive } from "../src/healthProducts.js";
+import { fetchHealthProductDetailLive, fetchHealthProductTypesLive, filterHealthProducts, filterHealthProductTypes, searchHealthProductsLive, searchGeneralFoodsLive } from "../src/healthProducts.js";
 import handler from "../api/health-products.js";
 
 const originalFetch = globalThis.fetch;
@@ -8,6 +8,7 @@ let sessions = 0;
 let brokenCount = false;
 let listRequests = 0;
 let testRows = null;
+let generalRows = [];
 let timeoutSource = false;
 let sourceRequests = [];
 let failedListPage = null;
@@ -36,9 +37,10 @@ globalThis.fetch = async (url, options = {}) => {
   listRequests++;
   assert.equal(options.method, "POST");
   const keyword = options.body.get("s_keyword1");
-  const allRows = testRows || [...Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D")), raw(21, "마그네슘(수출용)", "마그네슘")];
-  const rows = allRows.filter((row) => keyword === " " ? row.PRDLST_NM.includes(" ") === (options.body.get("s_opt1") === "I")
-    : [row.PRDLST_NM, row.BSSH_NM].some((value) => value.includes(keyword)));
+  const allRows = options.body.get("s_prdlst_grp") === "C0000000000000" ? generalRows : testRows || [...Array.from({ length: 20 }, (_, i) => raw(i + 1, `비타민 제품 ${revision}-${i}`, "비타민 D")), raw(21, "마그네슘(수출용)", "마그네슘")];
+  const rows = allRows.filter((row) => (keyword === " " ? row.PRDLST_NM.includes(" ") === (options.body.get("s_opt1") === "I")
+    : [row.PRDLST_NM, row.BSSH_NM].some((value) => value.includes(keyword)))
+    && (!options.body.get("prd_cd_nm") || row.PRDLST_CD_NM.includes(options.body.get("prd_cd_nm"))));
   sourceRequests.push({ keyword, endpoint: String(url), page: options.body.get("s_page_num"), pageSize: options.body.get("s_list_cnt"), order: options.body.get("s_order_by") });
   if (url.includes("searchPrdListCnt_1")) return Response.json({ totCnt: brokenCount ? null : rows.length });
   assert.ok(url.endsWith("searchPrdList_1.do"));
@@ -159,6 +161,41 @@ try {
   const detailsBeforeRestriction = detailRequests;
   await assert.rejects(fetchHealthProductTypesLive(Array.from({ length: 20 }, (_, i) => String(i + 1))), { code: "UPSTREAM_RESTRICTED" });
   assert.ok(detailRequests - detailsBeforeRestriction <= 5);
+  generalRows = Array.from({ length: 43 }, (_, i) => ({ ...raw(100 + i, i < 41 ? `홍삼젤리 ${i}${i === 0 ? "(수출용)" : ""}` : `파이브과자 ${i}`, i % 2 ? "캔디류" : "기타가공품"),
+    PREFIX_PRDLST_CD: "C", PRDLST_CD: "C0323", FOOD_HF_LS_CL_CD: "001", PRDLST_REPORT_NO: String(10000 + i) }));
+  const general = await searchGeneralFoodsLive({ query: "홍삼젤리" });
+  assert.equal(general.total, 41);
+  assert.equal(general.items.length, 20);
+  assert.equal(general.items[0].foodCategory, "general");
+  const beforeCachedPage = listRequests;
+  assert.equal((await searchGeneralFoodsLive({ query: "홍삼젤리", page: 3 })).items.length, 1);
+  assert.equal(listRequests, beforeCachedPage);
+  assert.equal((await searchGeneralFoodsLive({ query: "홍삼젤리", includeExport: false })).total, 40);
+  const generalTypes = await searchGeneralFoodsLive({ query: "캔디류", target: "types" });
+  assert.equal(generalTypes.total, 21);
+  assert.ok(generalTypes.items.every((item) => item.type === "캔디류"));
+  const mixedFields = await searchGeneralFoodsLive({ query: "홍삼젤리 AND 캔디류", target: "all", allResults: true });
+  assert.equal(mixedFields.total, 20);
+  assert.equal(mixedFields.items.length, 20);
+  const combined = await searchGeneralFoodsLive({ query: "홍삼젤리", target: "all", company: "엔피케이", allResults: true });
+  assert.equal(combined.total, 21);
+  assert.ok(combined.items.every((item) => item.company === "엔피케이(주)"));
+  await assert.rejects(searchGeneralFoodsLive(), { status: 400 });
+  await assert.rejects(searchGeneralFoodsLive({ query: "NOT 젤리" }), { status: 400 });
+  await assert.rejects(searchGeneralFoodsLive({ query: "AND" }), { status: 400 });
+  const exportResponse = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(body) { this.body = body; } };
+  await handler({ method: "GET", query: { foodCategory: "general", q: "홍삼젤리", export: "all" } }, exportResponse);
+  const { gunzipSync } = await import("node:zlib");
+  const exportedGeneral = JSON.parse(gunzipSync(exportResponse.body));
+  assert.equal(exportedGeneral.total, 41);
+  assert.equal(exportedGeneral.items.length, 41);
+  assert.equal(exportedGeneral.foodCategory, "general");
+  generalRows = [{ ...raw(999, "분류오류", "아연"), PREFIX_PRDLST_CD: "E" }];
+  await assert.rejects(searchGeneralFoodsLive({ query: "분류오류" }), /분류/);
+  generalRows = Array.from({ length: 20001 }, (_, i) => ({ ...raw(i, "초대형결과", "캔디류"), PREFIX_PRDLST_CD: "C" }));
+  const beforeBroad = sourceRequests.length;
+  await assert.rejects(searchGeneralFoodsLive({ query: "초대형결과" }), { status: 422 });
+  assert.ok(sourceRequests.slice(beforeBroad).every((request) => request.endpoint.endsWith("searchPrdListCnt_1.do")));
   restrictedDetail = false;
   timeoutSource = true;
   await handler({ method: "GET", query: {} }, response);

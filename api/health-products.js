@@ -12,7 +12,7 @@ export default async function handler(request, response) {
     if (request.query.export === "all") {
       return sendHealthProductExport(response, await getHealthProductExport({
         query: String(request.query.q || "").trim(), target: request.query.target || "name",
-        company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false"
+        company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false", foodCategory: request.query.foodCategory || "health"
       }));
     }
     const result = request.query.report !== undefined ? await fetchFoodsafetyProductDetail(request.query.report)
@@ -20,7 +20,7 @@ export default async function handler(request, response) {
       ? await fetchHealthProductDetailLive(request.query.id)
       : request.query.ids !== undefined ? await fetchHealthProductTypesLive(String(request.query.ids).split(","))
       : await searchHealthProducts({ page: request.query.page, query: String(request.query.q || "").trim(),
-        target: request.query.target || "name", company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false" });
+        target: request.query.target || "name", company: String(request.query.company || "").trim(), includeExport: request.query.includeExport !== "false", foodCategory: request.query.foodCategory || "health" });
     return response.status(200).json(result);
   } catch (error) {
     if (error.name === "TimeoutError") return response.status(504).json({ error: "원본 사이트의 응답이 지연되었습니다. 잠시 후 다시 검색해주세요." });

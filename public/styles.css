@@ -227,7 +227,7 @@ button:disabled {
 
 .product-search-controls {
   display: grid;
-  grid-template-columns: auto minmax(160px, 1fr) minmax(140px, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(160px, 1fr) minmax(140px, 1fr) auto auto;
   gap: 12px;
   align-items: end;
 }
@@ -248,6 +248,11 @@ button:disabled {
   max-width: 420px;
   white-space: normal;
   line-height: 1.45;
+}
+
+.products-general .product-ingredients,
+.products-general .product-full-types-heading {
+  display: none;
 }
 
 .product-search-controls label {

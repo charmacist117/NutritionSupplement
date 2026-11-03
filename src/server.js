@@ -120,7 +120,7 @@ const server = createServer(async (request, response) => {
       if (url.searchParams.get("export") === "all") {
         return sendHealthProductExport(response, await getHealthProductExport({
           query: String(url.searchParams.get("q") || "").trim(), target: url.searchParams.get("target") || "name",
-          company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false"
+          company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false", foodCategory: url.searchParams.get("foodCategory") || "health"
         }));
       }
       const result = url.searchParams.has("report") ? await fetchFoodsafetyProductDetail(url.searchParams.get("report"))
@@ -128,7 +128,7 @@ const server = createServer(async (request, response) => {
         ? await fetchHealthProductDetailLive(url.searchParams.get("id"))
         : url.searchParams.has("ids") ? await fetchHealthProductTypesLive(url.searchParams.get("ids").split(","))
         : await searchHealthProducts({ page: url.searchParams.get("page"), query: String(url.searchParams.get("q") || "").trim(),
-          target: url.searchParams.get("target") || "name", company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false" });
+          target: url.searchParams.get("target") || "name", company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false", foodCategory: url.searchParams.get("foodCategory") || "health" });
       return sendJson(response, 200, result);
     }
 

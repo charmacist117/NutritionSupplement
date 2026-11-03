@@ -1,5 +1,5 @@
 import { gunzipSync } from "node:zlib";
-import { filterHealthProductTypes, pageHealthProducts, searchHealthProductsLive } from "./healthProducts.js";
+import { filterHealthProductTypes, pageHealthProducts, searchHealthProductsLive, searchGeneralFoodsLive } from "./healthProducts.js";
 
 export const CATALOG_RELEASE_URL = "https://api.github.com/repos/charmacist117/NutritionSupplement/releases/tags/product-type-catalog";
 let cachedCatalog;
@@ -64,6 +64,10 @@ export function searchProductTypeCatalog(catalog, { page = 1, query = "", target
 }
 
 export async function searchHealthProducts(options = {}) {
+  if (options.foodCategory === "general") return searchGeneralFoodsLive(options);
+  if (options.foodCategory && options.foodCategory !== "health") {
+    const error = new Error("식품 구분을 확인해주세요."); error.status = 400; throw error;
+  }
   const target = options.target || "name";
   if (target === "name") return searchHealthProductsLive(options);
   if (!["types", "ingredients", "all"].includes(target)) {
