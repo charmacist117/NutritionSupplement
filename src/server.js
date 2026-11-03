@@ -240,6 +240,7 @@ function handleError(response, error) {
   console.error(error);
   sendJson(response, Number(error.status) || 500, {
     error: error.message || "Internal server error",
+    code: error.code,
     details: error.stack ? error.stack.split("\n").slice(0, 3).join("\n") : null
   });
 }

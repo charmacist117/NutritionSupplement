@@ -592,6 +592,7 @@ async function loadProducts(page = 1) {
   const controller = new AbortController();
   productsRequest = controller;
   productsStatus.textContent = productsSearchTarget.value === "name" ? "식품안전나라에서 최신 제품 목록을 조회하는 중입니다." : "전체 상세 유형 자료에서 검색하는 중입니다.";
+  productsPage.textContent = "조회 중";
   productsBody.innerHTML = '<tr><td colspan="8">제품 목록을 불러오는 중입니다.</td></tr>';
   productRows.clear();
   productsPrevButton.disabled = true;
@@ -648,7 +649,7 @@ async function loadProducts(page = 1) {
     if (controller.signal.aborted || productsRequest !== controller) return;
     productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
     productsStatus.textContent = error.message;
-    productsPage.textContent = "1 / 1";
+    productsPage.textContent = "조회 불가";
   }
 }
 

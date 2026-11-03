@@ -22,6 +22,20 @@ assert.equal(searchProductTypeCatalog(catalog, { query: "NOT 마그네슘" }).to
 assert.equal(searchProductTypeCatalog(catalog, { query: "NOT 마그네슘", includeExport: false }).total, 0);
 assert.equal(searchProductTypeCatalog(catalog, { query: "비타민D", company: "코스맥스 엔비티" }).total, 2);
 assert.equal(searchProductTypeCatalog(catalog, { query: "더파르마 AND 비타민D", target: "all" }).total, 1);
+// 생소한 유형도 제품명·대표 유형과 무관하게 전체 자료에서 찾는다.
+const rareCatalog = { ...catalog, total: 41, items: Array.from({ length: 41 }, (_, i) => ({
+  ...items[0], id: String(100 + i), name: `복합 제품 ${i}`, type: "비타민 C", allTypes: "비타민 C, 프랑스해안송껍질추출물, 타마린드종자추출물"
+})) };
+for (const target of ["types", "all"]) {
+  assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "프랑스해안송" }).total, 41);
+  const lastPage = searchProductTypeCatalog(rareCatalog, { target, query: "프랑스해안송", page: 3 });
+  assert.equal(lastPage.totalPages, 3);
+  assert.equal(lastPage.items.length, 1);
+  assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "타마린드" }).total, 41);
+  assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "해당없는생소한유형" }).total, 0);
+  assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "" }).total, 41);
+}
+assert.equal(searchProductTypeCatalog(rareCatalog, { target: "all", query: '"복합 제품" AND 프랑스해안송' }).total, 41);
 assert.throws(() => searchProductTypeCatalog(catalog, { query: "AND" }), { status: 400 });
 const raw = (id) => ({ PRDLST_REPORT_NO: String(id), PRDLST_NM: `제품 ${id}`, BSSH_NM: "코스맥스엔비티(주)",
   PRDLST_CDNM: "마그네슘", RAWMTRL_NM: "마그네슘, 비타민 D" });
@@ -66,9 +80,10 @@ await assert.rejects(fetchFoodsafetyApiPage(1, 1000), /INFO-100/);
 if (originalKey === undefined) delete process.env.FOODSAFETY_API_KEY; else process.env.FOODSAFETY_API_KEY = originalKey;
 let requests = 0;
 let unavailable = true;
+let unavailableStatus = 404;
 globalThis.fetch = async (url) => {
   requests++;
-  if (unavailable) return new Response("not ready", { status: 404 });
+  if (unavailable) return new Response("not ready", { status: unavailableStatus });
   if (String(url).includes("api.github.com")) return Response.json({ assets: [
     { id: 2, state: "uploaded", name: "catalog-2-1.json.gz", browser_download_url: "https://github.com/broken.gz" },
     { id: 1, state: "uploaded", name: "catalog-1-1.json.gz", browser_download_url: "https://github.com/catalog.gz" }
@@ -80,12 +95,20 @@ try {
   await assert.rejects(searchHealthProducts({ target: "bad" }), { status: 400 });
   await assert.rejects(searchHealthProducts({ target: "types", query: "AND" }), { status: 400 });
   assert.equal(requests, 0);
-  await assert.rejects(loadProductTypeCatalog(), { status: 503 });
+  await assert.rejects(loadProductTypeCatalog(), { status: 503, code: "CATALOG_NOT_READY" });
+  const missingResponse = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; return this; } };
+  await handler({ method: "GET", query: { target: "all", q: "프랑스해안송" } }, missingResponse);
+  assert.equal(missingResponse.statusCode, 503);
+  assert.equal(missingResponse.data.code, "CATALOG_NOT_READY");
+  assert.doesNotMatch(missingResponse.data.error, /제품명 검색을/);
+  unavailableStatus = 502;
+  await assert.rejects(loadProductTypeCatalog(), { status: 503, code: "CATALOG_UNAVAILABLE" });
+  const requestsBeforeReady = requests;
   unavailable = false;
   assert.equal((await searchHealthProducts({ target: "types", query: "마그네슘 AND 비타민D" })).total, 2);
   assert.equal((await searchHealthProducts({ target: "ingredients", query: "비타민D" })).total, 3);
   assert.equal((await loadProductTypeCatalog()).total, 3);
-  assert.equal(requests, 4);
+  assert.equal(requests - requestsBeforeReady, 3);
   const response = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; return this; } };
   await handler({ method: "GET", query: { target: "types", q: "마그네슘 AND 비타민D", company: "코스맥스" } }, response);
   assert.equal(response.statusCode, 200);

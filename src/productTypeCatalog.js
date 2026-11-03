@@ -22,12 +22,15 @@ export async function loadProductTypeCatalog() {
   if (cachedCatalog && Date.now() - checkedAt < 600000) return cachedCatalog;
   if (loading) return loading;
   loading = (async () => {
+    let notReady = false;
     try {
       const response = await fetch(CATALOG_RELEASE_URL, { headers: { Accept: "application/vnd.github+json", "User-Agent": "NutritionSupplement" }, signal: AbortSignal.timeout(15000) });
+      notReady = response.status === 404;
       if (!response.ok) throw new Error(`전체 유형 자료 조회 오류 (${response.status})`);
       const release = await response.json();
       const assets = (release.assets || []).filter((asset) => /^catalog-\d+-\d+\.json\.gz$/.test(asset.name) && asset.state === "uploaded")
         .sort((a, b) => b.id - a.id);
+      notReady = assets.length === 0;
       for (const asset of assets.slice(0, 2)) {
         try {
           const data = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(20000) });
@@ -40,8 +43,11 @@ export async function loadProductTypeCatalog() {
       throw new Error("완성된 전체 유형 자료가 없습니다.");
     } catch (error) {
       if (cachedCatalog) { checkedAt = Date.now(); return cachedCatalog; }
-      const unavailable = new Error("품목 총 유형 검색 자료가 아직 준비되지 않았거나 불러올 수 없습니다. 제품명 검색을 이용해주세요.");
+      const unavailable = new Error(notReady
+        ? "전체 유형 검색 자료가 아직 구축되지 않았습니다. 공식 API 인증키 연결과 최초 전체 수집이 필요합니다. 검색 결과가 없는 상태와는 다릅니다."
+        : "전체 유형 검색 자료를 불러오지 못했습니다. 잠시 후 같은 검색 조건으로 다시 검색해주세요.");
       unavailable.status = 503;
+      unavailable.code = notReady ? "CATALOG_NOT_READY" : "CATALOG_UNAVAILABLE";
       throw unavailable;
     }
   })();
