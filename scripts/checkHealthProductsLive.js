@@ -78,6 +78,13 @@ try {
   assert.ok(byCompany.items.every((item) => item.company === "엔피케이(주)"));
   assert.equal((await searchHealthProductsLive({ query: "비타민", company: "엔피케이" })).total, 10);
   assert.equal((await searchHealthProductsLive({ query: "마그네슘", company: "엔피케이" })).total, 0);
+  const allLive = await searchHealthProductsLive({ allResults: true });
+  assert.equal(allLive.total, 21);
+  assert.equal(allLive.items.length, 21);
+  assert.equal(allLive.totalPages, 1);
+  const allCompany = await searchHealthProductsLive({ query: "비타민", company: "엔피케이", includeExport: false, allResults: true });
+  assert.equal(allCompany.total, 10);
+  assert.equal(allCompany.items.length, 10);
   const beforeInvalid = sessions;
   await assert.rejects(searchHealthProductsLive({ query: "비타민 AND" }), { status: 400 });
   await assert.rejects(searchHealthProductsLive({ target: "bad" }), { status: 400 });

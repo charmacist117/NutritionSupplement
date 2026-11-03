@@ -11,6 +11,7 @@ import { createComparisonReportPdf, createExecutiveReportPdf } from "./executive
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "./individualIngredients.js";
 import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "./healthProducts.js";
 import { searchHealthProducts } from "./productTypeCatalog.js";
+import { getHealthProductExport, sendHealthProductExport } from "./healthProductExport.js";
 import { fetchFoodsafetyProductDetail } from "./foodsafetyApi.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
@@ -116,6 +117,12 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/health-products") {
       response.setHeader("Cache-Control", "no-store");
       if (request.method !== "GET") return sendJson(response, 405, { error: "Method not allowed" });
+      if (url.searchParams.get("export") === "all") {
+        return sendHealthProductExport(response, await getHealthProductExport({
+          query: String(url.searchParams.get("q") || "").trim(), target: url.searchParams.get("target") || "name",
+          company: String(url.searchParams.get("company") || "").trim(), includeExport: url.searchParams.get("includeExport") !== "false"
+        }));
+      }
       const result = url.searchParams.has("report") ? await fetchFoodsafetyProductDetail(url.searchParams.get("report"))
         : url.searchParams.has("id")
         ? await fetchHealthProductDetailLive(url.searchParams.get("id"))

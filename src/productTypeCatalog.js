@@ -54,10 +54,10 @@ export async function loadProductTypeCatalog() {
   try { return await loading; } finally { loading = null; }
 }
 
-export function searchProductTypeCatalog(catalog, { page = 1, query = "", target = "types", company = "", includeExport = true } = {}) {
+export function searchProductTypeCatalog(catalog, { page = 1, query = "", target = "types", company = "", includeExport = true, allResults = false } = {}) {
   validateProductTypeCatalog(catalog);
   const matchedIds = filterHealthProductTypes(catalog.items, query, { includeName: target === "all" });
-  const result = pageHealthProducts(catalog, [], { page, matchedIds, company, includeExport });
+  const result = pageHealthProducts(catalog, [], { page, matchedIds, company, includeExport, allResults });
   return { page: result.page, pageSize: result.pageSize, total: result.total, totalPages: result.totalPages,
     items: result.items, indexedTotal: catalog.total, fetchedAt: catalog.builtAt, catalogBuiltAt: catalog.builtAt,
     sourceUrl: catalog.sourceUrl, searchBasis: target === "all" ? "제품명·품목 총 유형" : "품목 총 유형" };

@@ -6,7 +6,7 @@ export const HEALTH_PRODUCTS_SOURCE_URL = `${ORIGIN}/portal/specialinfo/searchIn
 export const HEALTH_PRODUCT_CHUNK_SIZE = 500;
 export const HEALTH_PRODUCT_PAGE_SIZE = 20;
 
-export async function searchHealthProductsLive({ page = 1, query = "", target = "name", company = "", includeExport = true } = {}) {
+export async function searchHealthProductsLive({ page = 1, query = "", target = "name", company = "", includeExport = true, allResults = false } = {}) {
   if (!["name", "ingredients", "all"].includes(target)) {
     const error = new Error("검색 대상을 확인해주세요.");
     error.status = 400;
@@ -17,7 +17,7 @@ export async function searchHealthProductsLive({ page = 1, query = "", target = 
   const companyKeyword = String(company).match(/[가-힣]/)?.[0];
   const index = await fetchHealthProductIndex({ keywords: keywords && keywords.length <= 4 ? keywords : companyKeyword ? [companyKeyword] : null });
   const matchedIds = query ? filterHealthProducts(index.items, [], query, target) : null;
-  const result = pageHealthProducts(index, [], { page, matchedIds, company, includeExport });
+  const result = pageHealthProducts(index, [], { page, matchedIds, company, includeExport, allResults });
   return {
     page: result.page, pageSize: result.pageSize, total: result.total, totalPages: result.totalPages,
     items: result.items, indexedTotal: index.total, fetchedAt: index.syncedAt,
@@ -122,7 +122,7 @@ export function refreshHealthProductIndex(current, fetched) {
     complete: items.length <= current.detailTotal && current.searchIndexedThrough >= current.detailTotal };
 }
 
-export function pageHealthProducts(index, details, { page = 1, matchedIds = null, keyword = "", company = "", includeExport = true } = {}) {
+export function pageHealthProducts(index, details, { page = 1, matchedIds = null, keyword = "", company = "", includeExport = true, allResults = false } = {}) {
   const term = searchKey(keyword);
   const companyTerm = searchKey(company);
   const activeItems = (index?.items || []).filter((item) => item.active !== false);
@@ -130,13 +130,14 @@ export function pageHealthProducts(index, details, { page = 1, matchedIds = null
     && (!companyTerm || searchKey(item.company).includes(companyTerm))
     && (includeExport || !/[（(]\s*수출용\s*[)）]/.test(item.name || ""))
     && (!term || [item.name, item.company, item.reportNumber].some((value) => searchKey(value).includes(term))));
-  const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PRODUCT_PAGE_SIZE));
+  const pageSize = allResults ? Math.max(1, filtered.length) : HEALTH_PRODUCT_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
-  const start = (currentPage - 1) * HEALTH_PRODUCT_PAGE_SIZE;
+  const start = (currentPage - 1) * pageSize;
   const detailMap = new Map((details || []).map((item) => [item.id, item]));
   return {
-    page: currentPage, pageSize: HEALTH_PRODUCT_PAGE_SIZE, total: filtered.length, totalPages,
-    items: filtered.slice(start, start + HEALTH_PRODUCT_PAGE_SIZE).map((item) => ({ ...item, detail: detailMap.get(item.id) || null })),
+    page: currentPage, pageSize, total: filtered.length, totalPages,
+    items: filtered.slice(start, start + pageSize).map((item) => ({ ...item, detail: detailMap.get(item.id) || null })),
     indexedTotal: activeItems.length, detailTotal: activeItems.filter((item) => item.index < (index?.detailTotal || 0)).length,
     searchIndexedThrough: index?.searchIndexedThrough || 0,
     complete: activeItems.every((item) => item.index < Number(index?.detailTotal || 0) && item.index < Number(index?.searchIndexedThrough || 0)),

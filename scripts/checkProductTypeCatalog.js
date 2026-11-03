@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { collectProductTypeCatalog } from "./collectProductTypes.js";
 import { fetchFoodsafetyApiPage, normalizeFoodsafetyProduct, fetchFoodsafetyProductDetail } from "../src/foodsafetyApi.js";
 import { validateProductTypeCatalog, searchProductTypeCatalog, searchHealthProducts, loadProductTypeCatalog } from "../src/productTypeCatalog.js";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
+import { getHealthProductExport } from "../src/healthProductExport.js";
 import handler from "../api/health-products.js";
 
 const now = new Date().toISOString();
@@ -34,6 +35,9 @@ for (const target of ["types", "all"]) {
   assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "타마린드" }).total, 41);
   assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "해당없는생소한유형" }).total, 0);
   assert.equal(searchProductTypeCatalog(rareCatalog, { target, query: "" }).total, 41);
+  const full = searchProductTypeCatalog(rareCatalog, { target, query: "프랑스해안송", allResults: true });
+  assert.equal(full.items.length, 41);
+  assert.equal(full.totalPages, 1);
 }
 assert.equal(searchProductTypeCatalog(rareCatalog, { target: "all", query: '"복합 제품" AND 프랑스해안송' }).total, 41);
 assert.throws(() => searchProductTypeCatalog(catalog, { query: "AND" }), { status: 400 });
@@ -113,5 +117,28 @@ try {
   await handler({ method: "GET", query: { target: "types", q: "마그네슘 AND 비타민D", company: "코스맥스" } }, response);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.data.items.map((item) => item.id), ["1", "3"]);
+  const downloadResponse = { headers: {}, setHeader(name, value) { this.headers[name] = value; }, end(body) { this.body = body; } };
+  await handler({ method: "GET", query: { export: "all", target: "types", q: "비타민D", includeExport: "false", company: "코스맥스" } }, downloadResponse);
+  assert.equal(downloadResponse.statusCode, 200);
+  assert.equal(downloadResponse.headers["Content-Encoding"], "gzip");
+  const exported = JSON.parse(gunzipSync(downloadResponse.body));
+  assert.equal(exported.items.length, exported.total);
+  assert.deepEqual(exported.items.map((item) => item.id), ["1", "3"]);
+  assert.equal(exported.items[0].allTypes, "마그네슘, 비타민 D");
+  const missingExport = { setHeader() {}, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; return this; } };
+  await handler({ method: "GET", query: { export: "all", target: "all", q: "AND" } }, missingExport);
+  assert.equal(missingExport.statusCode, 400);
+  // 제품명 검색 결과는 그대로 유지하고 전체 유형만 품목보고번호로 보충한다.
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).endsWith("searchInfoProduct.do")) return new Response('<input name="callPage" value="123">');
+    if (String(url).includes("searchPrdListCnt_1")) return Response.json({ totCnt: 2 });
+    return Response.json({ prdList: ["1", "999"].map((id) => ({ PRDLST_REPORT_LEDG_NO: id,
+      PRDLST_REPORT_NO: id, PRDLST_NM: `더파르마 ${id}`, BSSH_NM: "코스맥스", PREFIX_PRDLST_CD: "E" })) });
+  };
+  const namedExport = await getHealthProductExport({ target: "name", query: "더파르마" });
+  assert.equal(namedExport.total, 2);
+  assert.equal(namedExport.items.find((item) => item.id === "1").allTypes, "마그네슘, 비타민 D");
+  assert.equal(namedExport.items.find((item) => item.id === "999").allTypes, undefined);
+  assert.equal(namedExport.catalogBuiltAt, now);
 } finally { globalThis.fetch = originalFetch; }
 console.log("full product type catalog and official API collection checks ok");

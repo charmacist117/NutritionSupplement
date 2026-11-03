@@ -92,6 +92,8 @@ const productsBody = document.querySelector("#products-body");
 const productsPrevButton = document.querySelector("#products-prev");
 const productsNextButton = document.querySelector("#products-next");
 const productsPage = document.querySelector("#products-page");
+const productsDownloadButton = document.querySelector("#products-download");
+const productsDownloadStatus = document.querySelector("#products-download-status");
 const productDetailDialog = document.querySelector("#product-detail-dialog");
 const productDetailTitle = document.querySelector("#product-detail-title");
 const productDetailMeta = document.querySelector("#product-detail-meta");
@@ -182,6 +184,8 @@ let ingredientsLoaded = false;
 let ingredientsCurrentPage = 1;
 let productsCurrentPage = 1;
 let productsRequest = null;
+let productsDownloadRequest = null;
+let productsSearchParams = null;
 let productDetailRequest = null;
 let productRows = new Map();
 let healthState = {
@@ -320,6 +324,16 @@ productsSearchForm.addEventListener("submit", async (event) => {
 });
 productsPrevButton.addEventListener("click", () => loadProducts(productsCurrentPage - 1));
 productsNextButton.addEventListener("click", () => loadProducts(productsCurrentPage + 1));
+productsDownloadButton.addEventListener("click", downloadProductsXlsx);
+productsSearchForm.addEventListener("input", () => {
+  productsRequest?.abort();
+  productsDownloadRequest?.abort();
+  productsSearchParams = null;
+  productsDownloadButton.disabled = true;
+  productsPrevButton.disabled = true;
+  productsNextButton.disabled = true;
+  productsDownloadStatus.textContent = "검색 조건이 변경되었습니다. 검색 후 전체 결과를 다운로드하세요.";
+});
 productsBody.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-product-id]");
   if (button) showProductDetail(productRows.get(button.dataset.productId));
@@ -589,6 +603,10 @@ async function loadIngredients(page) {
 
 async function loadProducts(page = 1) {
   productsRequest?.abort();
+  productsDownloadRequest?.abort();
+  productsSearchParams = null;
+  productsDownloadButton.disabled = true;
+  productsDownloadStatus.textContent = "";
   const controller = new AbortController();
   productsRequest = controller;
   productsStatus.textContent = productsSearchTarget.value === "name" ? "식품안전나라에서 최신 제품 목록을 조회하는 중입니다." : "전체 상세 유형 자료에서 검색하는 중입니다.";
@@ -605,6 +623,10 @@ async function loadProducts(page = 1) {
     if (productsRequest !== controller) return;
     productsCurrentPage = data.page;
     productRows = new Map(data.items.map((item) => [item.id, item]));
+    if (data.total > 0) {
+      productsSearchParams = params.toString();
+      productsDownloadButton.disabled = false;
+    }
     productsBody.innerHTML = data.items.length ? data.items.map((item) => `
       <tr>
         <td><strong>${escapeHtml(item.name)}</strong>${item.productionEnded ? " <small>생산종료</small>" : ""}</td><td>${escapeHtml(item.company)}</td>
@@ -650,6 +672,50 @@ async function loadProducts(page = 1) {
     productsBody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
     productsStatus.textContent = error.message;
     productsPage.textContent = "조회 불가";
+  }
+}
+
+async function downloadProductsXlsx() {
+  if (!productsSearchParams) return;
+  const controller = new AbortController();
+  productsDownloadRequest = controller;
+  productsDownloadButton.disabled = true;
+  productsDownloadStatus.textContent = "현재 검색 조건에 맞는 전체 결과의 엑셀 파일을 만드는 중입니다.";
+  const params = new URLSearchParams(productsSearchParams);
+  params.set("export", "all");
+  params.delete("page");
+  try {
+    const response = await fetch(`/api/health-products?${params}`, { cache: "no-store", signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "검색 결과를 다운로드하지 못했습니다.");
+    if (!Array.isArray(data.items) || data.items.length !== data.total) throw new Error("전체 검색 결과가 누락되어 다운로드를 중단했습니다.");
+    if (productsDownloadRequest !== controller) return;
+    const rows = [["제품명", "업체명", "품목보고번호", "품목유형", "품목 총 유형", "소비기한", "내수/수출", "생산종료 여부", "전체 유형 확인일시"],
+      ...data.items.map((item) => [item.name, item.company, item.reportNumber, item.type,
+        typeof item.allTypes === "string" ? item.allTypes || "원문 미기재" : "미확인",
+        item.shelfLife, item.domesticExport,
+        typeof item.productionEnded === "boolean" ? item.productionEnded ? "생산종료" : "아니오" : "원문 미제공",
+        item.typesFetchedAt || ""])
+    ];
+    const blob = createXlsxBlob("건강기능식품 검색", rows);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const keywordFileName = (params.get("q") || "전체").replace(/[^\p{L}\p{N}._-]+/gu, "_").slice(0, 60);
+    link.download = `건강기능식품_${keywordFileName}_${formatDate(new Date())}.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    const unchecked = data.items.filter((item) => typeof item.allTypes !== "string").length;
+    productsDownloadStatus.textContent = `전체 ${data.total.toLocaleString("ko-KR")}건 엑셀 다운로드 완료 · 전체 유형은 ${data.catalogBuiltAt ? new Date(data.catalogBuiltAt).toLocaleString("ko-KR") : "저장 자료"} 기준${unchecked ? ` · 전체 유형 미확인 ${unchecked}건` : ""}`;
+  } catch (error) {
+    if (!controller.signal.aborted) productsDownloadStatus.textContent = error.message || "다운로드에 실패했습니다. 다시 시도해주세요.";
+  } finally {
+    if (productsDownloadRequest === controller) {
+      productsDownloadRequest = null;
+      productsDownloadButton.disabled = !productsSearchParams;
+    }
   }
 }
 
