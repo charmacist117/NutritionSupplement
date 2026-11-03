@@ -38,7 +38,11 @@ export async function fetchImportedHealthProductPage(source, page = 1, pageSize 
   if (body?.totalCount === undefined || body.totalCount === null || body.totalCount === "" || !Number.isSafeInteger(total) || total < 0
     || rows.length !== Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize))
     || rows.some((row) => row.DCL_PRDUCT_SE_CD_NM !== "건강기능식품")) {
-    throw new Error("수입제품 공식 API의 전체 건수·페이지 누락·건강기능식품 구분 검증에 실패했습니다.");
+    const error = new Error("수입제품 공식 API의 전체 건수·페이지 누락·건강기능식품 구분 검증에 실패했습니다.");
+    error.details = { total: body?.totalCount, rows: rows.length, pageSize, bodyFields: Object.keys(body || {}),
+      itemsFields: items && !Array.isArray(items) ? Object.keys(items) : [],
+      rowFields: Object.keys(rows[0] || {}), productGroups: [...new Set(rows.map((row) => row.DCL_PRDUCT_SE_CD_NM))] };
+    throw error;
   }
   return { total, rows, sourceUrl: api.sourceUrl };
 }

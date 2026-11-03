@@ -11,5 +11,6 @@ try {
   await writeFile("수집자료/수입API-샘플.json", JSON.stringify(sources, null, 2));
 } catch (error) {
   console.error(error.message);
+  if (error.details) console.error(JSON.stringify(error.details));
   process.exitCode = 1;
 }
