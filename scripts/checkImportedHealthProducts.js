@@ -28,6 +28,8 @@ try {
     return result({ totalCount: 1, items: [row] });
   };
   assert.equal((await fetchImportedHealthProductPage("item")).total, 1);
+  globalThis.fetch = async () => result({ totalCount: 2, items: [{ item: row }, { item: row }] });
+  assert.deepEqual((await fetchImportedHealthProductPage("item", 1, 2)).rows, [row, row]);
   globalThis.fetch = async () => result({ totalCount: 1, items: { item: row } });
   assert.deepEqual((await fetchImportedHealthProductPage("text", 1, 1)).rows, [row]);
   globalThis.fetch = async () => result({ totalCount: 0, items: "" });
