@@ -1,0 +1,26 @@
+name: 수입 건강기능식품 자료 갱신
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: imported-health-products
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 수입제품 공식 API 연결 확인
+        run: node scripts/collectImportedProducts.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imported-product-sample
+          path: 수집자료/수입API-샘플.json
+          retention-days: 3
