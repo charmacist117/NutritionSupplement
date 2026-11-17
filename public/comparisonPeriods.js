@@ -66,6 +66,20 @@ export function buildComparisonPeriods(reports, mode, selectedPeriodKeys = null)
   return { periods, note: notes.join(" · ") };
 }
 
+export function buildKeywordRankChanges(points) {
+  let rankedBefore = false;
+  return points.map((point, index) => {
+    const previous = points[index - 1];
+    const seen = rankedBefore;
+    if (point) rankedBefore = true;
+    if (index === 0 || (!previous && !point)) return null;
+    if (!point) return { type: "exited", delta: null };
+    if (!previous) return { type: seen ? "returning" : "new", delta: null };
+    const delta = Number(previous.rank) - Number(point.rank);
+    return { type: delta > 0 ? "rising" : delta < 0 ? "falling" : "unchanged", delta };
+  });
+}
+
 function aggregateRankingPeriod(definition, sourceReports) {
   const reportMaps = sourceReports.map((report) => new Map(
     (report.rows || [])

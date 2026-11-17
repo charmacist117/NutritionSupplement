@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import "./checkCategoryAssignments.js";
 import "./checkImportedHealthProducts.js";
-import { buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "../public/comparisonPeriods.js";
+import { buildComparisonOptions, buildComparisonPeriods, buildKeywordRankChanges, comparisonMethodText } from "../public/comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "../public/categoryMappingReview.js";
 
 const months = (start, count) => {
@@ -44,6 +44,20 @@ assert.equal(ranked.rows[1].averageMonthlyRank, 334.667);
 assert.equal(buildComparisonPeriods([report("2025-02"), report("2025-01")], "month").periods[0].month, "2025-01");
 assert.match(comparisonMethodText("year"), /1~12월/);
 assert.match(comparisonMethodText("rollingYear"), /연속 12개월/);
+
+const keyword = (rank) => ({ keyword: "베르베린", rank });
+assert.deepEqual(buildKeywordRankChanges([
+  null, keyword(27), keyword(18), keyword(24), keyword(24), null, null, keyword(12)
+]), [
+  null,
+  { type: "new", delta: null },
+  { type: "rising", delta: 9 },
+  { type: "falling", delta: -6 },
+  { type: "unchanged", delta: 0 },
+  { type: "exited", delta: null },
+  null,
+  { type: "returning", delta: null }
+]);
 
 assert.equal(baseAutoProductCategoryFor("비타민 C"), "비타민c");
 assert.equal(baseAutoProductCategoryFor("구강 유산균"), "구강 건강");

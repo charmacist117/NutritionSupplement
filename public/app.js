@@ -1,4 +1,4 @@
-import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, comparisonMethodText } from "./comparisonPeriods.js";
+import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, buildKeywordRankChanges, comparisonMethodText } from "./comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "./categoryMappingReview.js";
 import { MAX_CATEGORY_ASSIGNMENTS, normalizeAssignedCategories, categoryMappingRecord } from "./categoryAssignments.js";
 
@@ -2103,7 +2103,7 @@ async function renderComparisonSheet(options = {}) {
   const first = reports[0];
   const previous = reports[reports.length - 2];
   const latest = reports[reports.length - 1];
-  comparisonRangeLabel.textContent = `키워드 ${periodLabel(previous)} 대비 ${periodLabel(latest)} · 제품군 증감 ${periodLabel(first)} 대비 ${periodLabel(latest)} · ${comparisonMethodText(comparisonMode)}`;
+  comparisonRangeLabel.textContent = `키워드 요약 ${periodLabel(previous)} 대비 ${periodLabel(latest)} · 제품군 증감 ${periodLabel(first)} 대비 ${periodLabel(latest)} · ${comparisonMethodText(comparisonMode)}`;
   comparisonStatus.textContent = `${selectedKeys.length}개 저장 자료로 ${reports.length}개 ${modeConfig.label} 기간 비교 중 · ${grouped.note}`;
   comparisonDownloadButton.disabled = false;
   comparisonPdfDownloadButton.disabled = false;
@@ -2415,7 +2415,8 @@ function buildComparisonKeywordRows(reports) {
     const previous = points[points.length - 2];
     const latest = points[points.length - 1];
     const keyword = latest?.keyword || previous?.keyword || [...points].reverse().find(Boolean)?.keyword || key;
-    const rankDelta = previous && latest ? Number(previous.rank) - Number(latest.rank) : null;
+    const changes = buildKeywordRankChanges(points);
+    const latestChange = changes.at(-1);
     const categories = productCategoriesFor(keyword);
 
     return {
@@ -2424,25 +2425,17 @@ function buildComparisonKeywordRows(reports) {
       categories,
       category: formatProductCategories(categories),
       points,
+      changes,
       previous,
       latest,
-      rankDelta,
-      changeType: keywordChangeType(points, previous, latest, rankDelta)
+      rankDelta: latestChange?.delta ?? null,
+      changeType: latestChange?.type === "returning" ? "new" : latestChange?.type
     };
   }).sort((a, b) => {
     if (a.latest && !b.latest) return -1;
     if (!a.latest && b.latest) return 1;
     return Number(a.latest?.rank || a.previous?.rank || 9999) - Number(b.latest?.rank || b.previous?.rank || 9999);
   });
-}
-
-function keywordChangeType(points, previous, latest, rankDelta) {
-  if (!previous && !latest && points.some(Boolean)) return "intermediate";
-  if (!previous && latest) return "new";
-  if (previous && !latest) return "exited";
-  if (rankDelta > 0) return "rising";
-  if (rankDelta < 0) return "falling";
-  return "unchanged";
 }
 
 function buildLatestRankChanges(reports) {
@@ -2634,14 +2627,11 @@ function categoryRankChangeClass(row) {
 }
 
 function renderComparisonKeywordTableHead(reports) {
-  const latestReports = reports.slice(-2);
   comparisonKeywordHead.innerHTML = `
     <tr>
       <th>검색어</th>
       <th>제품군</th>
-      ${latestReports.map((report) => `<th>${periodHeadingHtml(report)}<br>검색 순위</th>`).join("")}
-      <th>순위 변동</th>
-      <th>상태</th>
+      ${reports.map((report) => `<th>${periodHeadingHtml(report)}<br>검색 순위</th>`).join("")}
     </tr>
   `;
 }
@@ -2651,17 +2641,14 @@ function renderComparisonKeywordRows() {
 
   const search = normalizeText(comparisonKeywordSearch.value);
   const filter = comparisonKeywordFilter.value;
-  const comparableRows = comparisonKeywordRows.filter((row) => row.previous || row.latest);
-  const rows = comparableRows.filter((row) => {
-    if (filter !== "all" && row.changeType !== filter) return false;
+  const rows = comparisonKeywordRows.filter((row) => {
+    if (filter !== "all" && !row.changes.some((change) => change?.type === filter)) return false;
     return !search || normalizeText(row.keyword).includes(search) || normalizeText(row.category).includes(search);
   });
 
-  const previousReport = comparisonReports[comparisonReports.length - 2];
-  const latestReport = comparisonReports[comparisonReports.length - 1];
-  comparisonKeywordStatus.textContent = `${periodLabel(previousReport)} 대비 ${periodLabel(latestReport)} · 전체 ${comparableRows.length}개 중 ${rows.length}개 표시`;
+  comparisonKeywordStatus.textContent = `선택 기간 ${comparisonReports.length}개 · 전체 키워드 ${comparisonKeywordRows.length}개 중 ${rows.length}개 표시`;
   if (!rows.length) {
-    comparisonKeywordBody.innerHTML = `<tr><td colspan="6">조건에 맞는 키워드가 없습니다.</td></tr>`;
+    comparisonKeywordBody.innerHTML = `<tr><td colspan="${comparisonReports.length + 2}">조건에 맞는 키워드가 없습니다.</td></tr>`;
     return;
   }
 
@@ -2669,11 +2656,18 @@ function renderComparisonKeywordRows() {
     <tr>
       <td><strong>${escapeHtml(row.keyword)}</strong></td>
       <td>${escapeHtml(row.category)}</td>
-      ${row.points.slice(-2).map((point) => `<td>${point ? Number(point.rank) : "-"}</td>`).join("")}
-      <td class="${deltaClass(row.rankDelta)}">${row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta)}</td>
-      <td>${changeBadgeHtml(row.changeType)}</td>
+      ${row.points.map((point, index) => comparisonKeywordCellHtml(point, row.changes[index])).join("")}
     </tr>
   `).join("");
+}
+
+function comparisonKeywordCellHtml(point, change) {
+  const rank = point ? `${Number(point.rank)}위` : '<span aria-label="순위권 밖">–</span>';
+  if (!change) return `<td>${rank}</td>`;
+  const detail = change.delta == null
+    ? changeBadgeHtml(change.type)
+    : `<span class="${deltaClass(change.delta)}">${change.delta ? formatRankDelta(change.delta) : "변동 없음"}</span>`;
+  return `<td>${rank}<small class="comparison-keyword-change">${detail}</small></td>`;
 }
 
 function periodHeadingHtml(report) {
@@ -2699,16 +2693,8 @@ function deltaClass(value) {
 }
 
 function changeBadgeHtml(type) {
-  const labels = {
-    new: "신규 진입",
-    rising: "순위 상승",
-    falling: "순위 하락",
-    exited: "Top 500 이탈",
-    intermediate: "중간 기간만",
-    unchanged: "변동 없음"
-  };
-  const className = type === "new" || type === "rising" ? "positive" : type === "falling" || type === "exited" ? "negative" : "";
-  return `<span class="change-badge ${className}">${labels[type] || labels.unchanged}</span>`;
+  const className = ["new", "returning", "rising"].includes(type) ? "positive" : ["falling", "exited"].includes(type) ? "negative" : "";
+  return `<span class="change-badge ${className}">${comparisonChangeLabel(type)}</span>`;
 }
 
 function downloadComparisonXlsx() {
@@ -2752,19 +2738,24 @@ function downloadComparisonXlsx() {
       ({ new: "신규 Top 500", rising: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, falling: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, exited: "Top 500 이탈" })[row.changeType]
     ]),
     [],
+    ["키워드 비교", "변동은 바로 앞 선택 기간 기준"],
     [
       "검색어",
       "제품군",
-      ...comparisonReports.slice(-2).map((report) => `${periodLabel(report)} 검색 순위`),
-      "순위 변동",
-      "상태"
+      ...periodLabels.flatMap((label, index) => [
+        `${label} 검색 순위`,
+        ...(index ? [`${label} 순위 변동`] : [])
+      ])
     ],
-    ...comparisonKeywordRows.filter((row) => row.previous || row.latest).map((row) => [
+    ...comparisonKeywordRows.map((row) => [
       row.keyword,
       row.category,
-      ...row.points.slice(-2).map((point) => point ? Number(point.rank) : ""),
-      row.rankDelta == null ? "" : row.rankDelta,
-      ({ new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", intermediate: "중간 기간만", unchanged: "변동 없음" })[row.changeType]
+      ...row.points.flatMap((point, index) => {
+        const rank = point ? Number(point.rank) : "";
+        if (!index) return [rank];
+        const change = row.changes[index];
+        return [rank, change ? change.delta ?? comparisonChangeLabel(change.type) : ""];
+      })
     ])
   ];
   const blob = createXlsxBlob("기간별 비교", rows);
@@ -2781,15 +2772,15 @@ function downloadComparisonXlsx() {
 async function downloadComparisonPdf() {
   if (comparisonReports.length < 2) return;
 
+  const fileName = `comparison_${comparisonMode}_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.pdf`;
   comparisonPdfDownloadButton.disabled = true;
   const originalText = comparisonPdfDownloadButton.textContent;
   comparisonPdfDownloadButton.textContent = "PDF 작성 중";
   try {
-    const content = buildComparisonEmailContent();
     const response = await fetch("/api/comparison-report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html: content.html })
+      body: JSON.stringify({ html: buildComparisonPdfHtml() })
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -2799,7 +2790,7 @@ async function downloadComparisonPdf() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `comparison_${comparisonMode}_${safeFileName(comparisonReports[0].month)}_${safeFileName(comparisonReports.at(-1).month)}.pdf`;
+    link.download = fileName;
     document.body.append(link);
     link.click();
     link.remove();
@@ -2817,7 +2808,7 @@ async function downloadComparisonPdf() {
   }
 }
 
-function buildComparisonEmailContent() {
+function buildComparisonPdfHtml() {
   const previous = comparisonReports[comparisonReports.length - 2];
   const latest = comparisonReports[comparisonReports.length - 1];
   const comparableRows = comparisonKeywordRows.filter((row) => row.previous || row.latest);
@@ -2862,14 +2853,26 @@ function buildComparisonEmailContent() {
     row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta),
     comparisonChangeLabel(row.changeType, true)
   ]);
-  const keywordRows = comparableRows.map((row) => [
-    row.keyword,
-    row.category,
-    row.previous ? Number(row.previous.rank) : "-",
-    row.latest ? Number(row.latest.rank) : "-",
-    row.rankDelta == null ? "-" : formatRankDelta(row.rankDelta),
-    comparisonChangeLabel(row.changeType)
-  ]);
+  const keywordTables = [];
+  // A4 has room for six date columns beside the keyword and product group.
+  for (let start = 0; start < comparisonReports.length; start += 6) {
+    const end = start + 6;
+    const headers = ["검색어", "제품군", ...comparisonReports.slice(start, end).map((report) => periodLabel(report))];
+    const rows = comparisonKeywordRows
+      .filter((row) => row.points.slice(start, end).some(Boolean) || row.changes[start]?.type === "exited")
+      .map((row) => [
+        row.keyword,
+        row.category,
+        ...row.points.slice(start, end).map((point, offset) => {
+          const rank = point ? `${Number(point.rank)}위` : "–";
+          const change = row.changes[start + offset];
+          if (!change) return rank;
+          const detail = change.delta ? formatRankDelta(change.delta) : comparisonChangeLabel(change.type);
+          return `${rank} (${detail})`;
+        })
+      ]);
+    keywordTables.push(reportTableHtml(headers, rows));
+  }
   const summaryItems = [
     [`${COMPARISON_MODES[comparisonMode].label} 비교 기간`, `${comparisonReports.length}개`],
     ["직전·최신 공통 검색어", `${counts.common}개`],
@@ -2894,7 +2897,7 @@ function buildComparisonEmailContent() {
     </td>
   `).join("");
 
-  const html = `
+  return `
     <div style="max-width:1100px;font-family:Arial,'Noto Sans KR',sans-serif;color:#17202a;line-height:1.45;">
       <div style="border-top:5px solid #168246;padding-top:18px;">
         <div style="font-size:12px;font-weight:700;color:#168246;">NAVER SHOPPING INSIGHT</div>
@@ -2910,35 +2913,14 @@ function buildComparisonEmailContent() {
       <h2 style="margin:24px 0 5px;font-size:18px;">최신 기간 주요 순위 변화</h2>
       <div style="margin-bottom:10px;font-size:12px;color:#667482;">${escapeHtml(latestRange)}</div>
       <table role="presentation" style="width:100%;border-collapse:collapse;margin-bottom:12px;"><tr>${latestSummaryHtml}</tr></table>
-      ${emailTableHtml(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], latestRows, "조건에 해당하는 최신 순위 변화가 없습니다.")}
+      ${reportTableHtml(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], latestRows, "조건에 해당하는 최신 순위 변화가 없습니다.")}
       <h2 style="margin:26px 0 10px;font-size:18px;">제품군 순위 비교</h2>
-      ${emailTableHtml(categoryHeaders, categoryRows)}
+      ${reportTableHtml(categoryHeaders, categoryRows)}
       <h2 style="margin:26px 0 5px;font-size:18px;">키워드 비교</h2>
-      <div style="margin-bottom:10px;font-size:12px;color:#667482;">${escapeHtml(latestRange)} · 최신 2개 기간만 비교</div>
-      ${emailTableHtml(["검색어", "제품군", `${periodLabel(previous)} 순위`, `${periodLabel(latest)} 순위`, "순위 변동", "상태"], keywordRows)}
+      <div style="margin-bottom:10px;font-size:12px;color:#667482;">선택 기간 ${comparisonReports.length}개 · 변동은 바로 앞 선택 기간 기준</div>
+      ${keywordTables.join('<div style="break-before:page"></div>')}
     </div>
   `;
-  const text = [
-    title,
-    range,
-    `산정 기준: ${comparisonMethodText(comparisonMode)}`,
-    "",
-    ...summaryItems.map(([label, value]) => `${label}: ${value}`),
-    "",
-    "변화 요약",
-    ...insightTexts,
-    "",
-    `최신 기간 주요 순위 변화 (${latestRange})`,
-    tabSeparatedText(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], latestRows),
-    "",
-    "제품군 순위 비교",
-    tabSeparatedText(categoryHeaders, categoryRows),
-    "",
-    `키워드 비교 (${latestRange})`,
-    tabSeparatedText(["검색어", "제품군", "이전 순위", "최신 순위", "순위 변동", "상태"], keywordRows)
-  ].join("\n");
-
-  return { html, text };
 }
 
 function comparisonInsightTexts(categoryRows, keywordRows) {
@@ -2966,20 +2948,16 @@ function comparisonInsightTexts(categoryRows, keywordRows) {
 function comparisonChangeLabel(type, latestSection = false) {
   const labels = latestSection
     ? { new: "신규 Top 500", rising: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급상승`, falling: `${LATEST_RANK_CHANGE_THRESHOLD}위 이상 급락`, exited: "Top 500 이탈", unchanged: "변동 없음" }
-    : { new: "신규 진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", unchanged: "변동 없음" };
+    : { new: "신규 진입", returning: "재진입", rising: "순위 상승", falling: "순위 하락", exited: "Top 500 이탈", unchanged: "변동 없음" };
   return labels[type] || labels.unchanged;
 }
 
-function emailTableHtml(headers, rows, emptyMessage = "표시할 자료가 없습니다.") {
-  const headerHtml = headers.map((header) => `<th style="padding:8px 9px;border:1px solid #d7dee8;background:#f1f4f7;color:#44515e;text-align:left;font-size:11px;">${escapeHtml(header)}</th>`).join("");
+function reportTableHtml(headers, rows, emptyMessage = "표시할 자료가 없습니다.") {
+  const headerHtml = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
   const bodyHtml = rows.length
-    ? rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:7px 9px;border:1px solid #d7dee8;font-size:12px;vertical-align:top;">${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")
+    ? rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")
     : `<tr><td colspan="${headers.length}" style="padding:10px;border:1px solid #d7dee8;color:#667482;font-size:12px;">${escapeHtml(emptyMessage)}</td></tr>`;
-  return `<table style="width:100%;border-collapse:collapse;border-spacing:0;"> <thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
-}
-
-function tabSeparatedText(headers, rows) {
-  return [headers, ...rows].map((row) => row.map((cell) => String(cell ?? "").replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+  return `<table class="comparison-report-table"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
 }
 
 function periodAxisLabelParts(value) {

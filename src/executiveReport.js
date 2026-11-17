@@ -67,6 +67,10 @@ function renderComparisonHtml(content) {
     *{box-sizing:border-box}html,body{margin:0;padding:0;color:#17202a;font-family:"Noto Sans KR",Arial,sans-serif}
     body{font-size:10px}h1{font-size:22px}h2{font-size:15px;break-after:avoid}table{break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid;break-after:auto}
     td,th{overflow-wrap:anywhere}div{max-width:none!important}
+    .comparison-report-table{width:100%;border-collapse:collapse;margin-bottom:12px}
+    .comparison-report-table th,.comparison-report-table td{padding:7px 9px;border:1px solid #d7dee8;text-align:left;vertical-align:top}
+    .comparison-report-table th{background:#f1f4f7;color:#44515e;font-size:11px}
+    .comparison-report-table td{font-size:12px}
   </style></head><body>${content}</body></html>`;
 }
 
