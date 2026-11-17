@@ -32,6 +32,9 @@ const categoryManageSelect = document.querySelector("#category-manage-select");
 const categoryRenameInput = document.querySelector("#category-rename-input");
 const categoryRenameButton = document.querySelector("#category-rename-button");
 const categoryDeleteButton = document.querySelector("#category-delete-button");
+const categoryOrderList = document.querySelector("#category-order-list");
+const categoryOrderStatus = document.querySelector("#category-order-status");
+const categoryOrderButtons = [...document.querySelectorAll("[data-category-move]")];
 const categoryStatusRefreshButton = document.querySelector("#category-status-refresh");
 const categoryStatusSummary = document.querySelector("#category-status-summary");
 const statusSeriesType = document.querySelector("#status-series-type");
@@ -248,6 +251,13 @@ categoryManageSelect.addEventListener("change", () => {
 });
 categoryRenameButton.addEventListener("click", () => renameProductCategory());
 categoryDeleteButton.addEventListener("click", () => deleteProductCategory());
+categoryOrderList.addEventListener("change", updateCategoryOrderButtons);
+for (const button of categoryOrderButtons) {
+  button.addEventListener("click", () => {
+    moveProductCategory(button.dataset.categoryMove);
+    if (button.disabled) categoryOrderList.focus();
+  });
+}
 
 categoryStatusRefreshButton.addEventListener("click", async () => {
   await renderCategoryStatusSheet({ refreshReports: true });
@@ -1383,6 +1393,7 @@ async function saveCategoryMappingsFromSheet() {
   categoryAddButton.disabled = true;
   categoryRenameButton.disabled = true;
   categoryDeleteButton.disabled = true;
+  updateCategoryOrderButtons();
   mappingStatus.textContent = "카테고리 매칭을 저장하는 중입니다.";
 
   try {
@@ -1390,6 +1401,7 @@ async function saveCategoryMappingsFromSheet() {
     renderMappingSummary();
     renderMappingRows();
     mappingStatus.textContent = `${saved.categories.length}개 카테고리와 ${saved.mappings.length}개 키워드 매칭을 저장했습니다.`;
+    categoryOrderStatus.textContent = "";
   } catch (error) {
     mappingStatus.textContent = error.message;
   } finally {
@@ -1449,25 +1461,48 @@ function resolveCategoryName(value) {
 }
 
 function updateCategoryManagerOptions(preferredCategory = "") {
-  const current = preferredCategory || categoryManageSelect.value;
+  const previous = categoryManageSelect.value;
+  const current = preferredCategory || previous;
+  const ordering = categoryOrderList.value;
   categoryManageSelect.replaceChildren();
   mappingCategoryOptions.replaceChildren();
+  categoryOrderList.replaceChildren();
 
-  for (const category of productCategories) {
-    const option = document.createElement("option");
-    option.value = category;
-    option.textContent = category;
-    categoryManageSelect.append(option);
-
-    const searchOption = document.createElement("option");
-    searchOption.value = category;
-    mappingCategoryOptions.append(searchOption);
+  for (const [index, category] of productCategories.entries()) {
+    categoryManageSelect.append(new Option(category, category));
+    mappingCategoryOptions.append(new Option("", category));
+    categoryOrderList.append(new Option(`${index + 1}. ${category}`, category));
   }
 
   categoryManageSelect.value = productCategories.includes(current) ? current : productCategories[0] || "";
-  categoryRenameInput.value = categoryManageSelect.value;
+  if (preferredCategory || previous !== categoryManageSelect.value) categoryRenameInput.value = categoryManageSelect.value;
   categoryRenameButton.disabled = !productCategories.length;
   categoryDeleteButton.disabled = productCategories.length <= 1;
+  categoryOrderList.value = productCategories.includes(ordering) ? ordering : productCategories[0] || "";
+  categoryOrderList.disabled = !productCategories.length;
+  updateCategoryOrderButtons();
+}
+
+function updateCategoryOrderButtons() {
+  const index = categoryOrderList.selectedIndex;
+  const last = categoryOrderList.options.length - 1;
+  for (const button of categoryOrderButtons) {
+    const goesUp = ["first", "up"].includes(button.dataset.categoryMove);
+    button.disabled = mappingSaveButton.disabled || index < 0 || index === (goesUp ? 0 : last);
+  }
+}
+
+function moveProductCategory(direction) {
+  if (mappingSaveButton.disabled) return;
+  const index = categoryOrderList.selectedIndex;
+  const last = productCategories.length - 1;
+  const destination = ({ first: 0, up: index - 1, down: index + 1, last })[direction];
+  if (index < 0 || !Number.isInteger(destination) || destination < 0 || destination > last || destination === index) return;
+
+  const [category] = productCategories.splice(index, 1);
+  productCategories.splice(destination, 0, category);
+  updateCategoryManagerOptions();
+  categoryOrderStatus.textContent = `${category}을(를) ${destination + 1}번째로 옮겼습니다. 변경사항 저장을 눌러 확정해주세요.`;
 }
 
 function addProductCategory() {

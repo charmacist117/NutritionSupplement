@@ -145,6 +145,20 @@
             </label>
             <button id="category-delete-button" class="danger-button" type="button">삭제</button>
           </div>
+          <details class="category-order">
+            <summary>카테고리 순서 변경</summary>
+            <p id="category-order-help">목록에서 카테고리를 선택해 위치를 옮긴 뒤 상단의 ‘변경사항 저장’을 누르세요.</p>
+            <div class="category-order-controls">
+              <select id="category-order-list" size="8" aria-label="드롭다운에 표시할 카테고리 순서" aria-describedby="category-order-help"></select>
+              <div class="category-order-actions" role="group" aria-label="선택한 카테고리 이동">
+                <button type="button" class="secondary-button" data-category-move="first">맨 위</button>
+                <button type="button" class="secondary-button" data-category-move="up">위로</button>
+                <button type="button" class="secondary-button" data-category-move="down">아래로</button>
+                <button type="button" class="secondary-button" data-category-move="last">맨 아래</button>
+              </div>
+            </div>
+            <p id="category-order-status" role="status"></p>
+          </details>
         </section>
 
         <div class="mapping-toolbar">

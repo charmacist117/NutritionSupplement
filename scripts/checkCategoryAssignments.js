@@ -29,6 +29,11 @@ try {
   let loaded = await getKeywordCategoryMappings(options);
   assert.deepEqual(loaded.mappings[0].categories, categories);
   assert.deepEqual(JSON.parse(await readFile(join(outputDir, "keyword-category-mappings.json"), "utf8")).mappings[0].categories, categories);
+  const reordered = [categories.at(-1), ...categories.slice(0, -1)];
+  await saveKeywordCategoryMappings({ ...payload, categories: reordered }, options);
+  loaded = await getKeywordCategoryMappings(options);
+  assert.deepEqual(loaded.categories, reordered);
+  assert.deepEqual(loaded.mappings[0].categories, categories);
   const renamed = categories.map((category) => category === "비타민d" ? "비타민 D" : category);
   await saveKeywordCategoryMappings({ mappings: [categoryMappingRecord("복합제품", renamed)] }, options);
   loaded = await getKeywordCategoryMappings(options);

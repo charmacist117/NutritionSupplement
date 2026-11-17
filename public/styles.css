@@ -1252,6 +1252,7 @@ button:disabled {
 
 .category-manager-controls input,
 .category-manager-controls select,
+.category-order-controls select,
 .series-picker input,
 .series-picker select,
 .category-keyword-search input {
@@ -1262,6 +1263,37 @@ button:disabled {
   color: var(--ink);
   background: #fff;
   font: inherit;
+}
+
+.category-order summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.category-order-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 440px) minmax(0, 100px);
+  align-items: start;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.category-order-controls select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+}
+
+.category-order-actions {
+  display: grid;
+  gap: 6px;
+}
+
+#category-order-status:empty {
+  margin: 0;
 }
 
 .inline-control {
