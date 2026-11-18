@@ -18,7 +18,10 @@ const response = () => ({
 });
 try {
   delete process.env.ADMIN_PASSWORD;
+  assert.equal(adminSession({ headers: {} }).configurationIssue, "password_missing");
   assert.throws(() => requireAdmin({ headers: {} }), { status: 503 });
+  process.env.ADMIN_PASSWORD = "short";
+  assert.equal(adminSession({ headers: {} }).configurationIssue, "password_too_short");
   process.env.ADMIN_PASSWORD = "test-password-only-123456";
   process.env.CRON_SECRET = "test-cron-only";
   process.env.VERCEL = "1";

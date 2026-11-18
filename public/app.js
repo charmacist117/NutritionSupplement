@@ -456,7 +456,9 @@ function showAdminSession(session) {
   adminAuthenticated = session.authenticated;
   adminStatus.textContent = adminAuthenticated ? "관리자로 로그인했습니다. 로그인은 8시간 유지됩니다."
     : session.configured ? "저장·삭제·수집과 보고서 생성은 관리자 로그인 후 이용할 수 있습니다."
-    : "관리자 비밀번호 설정이 필요합니다. Vercel에 ADMIN_PASSWORD를 16자 이상으로 등록해주세요.";
+    : session.configurationIssue === "password_too_short"
+    ? "ADMIN_PASSWORD가 16자 미만입니다. Vercel의 Production 환경에서 16자 이상으로 변경해주세요."
+    : "ADMIN_PASSWORD가 설정되지 않았습니다. Vercel의 Production 환경에 16자 이상으로 등록해주세요.";
   adminLoginForm.hidden = adminAuthenticated;
   adminLogoutButton.hidden = !adminAuthenticated;
   updateMappingEditorState();

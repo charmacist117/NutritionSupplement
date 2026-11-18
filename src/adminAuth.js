@@ -17,7 +17,8 @@ function signature(value) {
 }
 
 export function adminSession(request) {
-  const configured = password().length >= 16;
+  const adminPassword = password();
+  const configured = adminPassword.length >= 16;
   const cookie = String(request.headers?.cookie || "").split(";")
     .map((part) => part.trim()).find((part) => part.startsWith(`${COOKIE_NAME}=`));
   const token = cookie?.slice(COOKIE_NAME.length + 1) || "";
@@ -25,7 +26,10 @@ export function adminSession(request) {
   const valid = configured && !extra && /^\d{10}$/.test(expires || "") && /^[A-Za-z0-9_-]{22}$/.test(nonce || "")
     && Number(expires) > Math.floor(Date.now() / 1000)
     && sameSecret(signed || "", signature(`${expires}.${nonce}`));
-  return { configured, authenticated: Boolean(valid) };
+  return {
+    configured, authenticated: Boolean(valid),
+    configurationIssue: configured ? null : adminPassword ? "password_too_short" : "password_missing"
+  };
 }
 
 export function requireAdmin(request) {
