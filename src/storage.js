@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeAssignedCategories, categoryMappingRecord } from "../public/categoryAssignments.js";
 
 const MONTHLY_PREFIX = "monthly";
@@ -11,6 +12,7 @@ const NAVER_API_SETTINGS_PATH = `${SETTINGS_PREFIX}/naver-api-settings.json`;
 const HEALTH_FUNCTIONAL_INGREDIENTS_PATH = `${INGREDIENTS_PREFIX}/health-functional-ingredients.json`;
 const HEALTH_PRODUCTS_INDEX_PATH = `${HEALTH_PRODUCTS_PREFIX}/index.json`;
 const BLOB_ACCESS = "private";
+const localMappingWrites = new Set();
 
 export async function saveMonthlyReport(result, options = {}) {
   const report = normalizeMonthlyReport(result);
@@ -127,31 +129,53 @@ export async function listMonthlyReports(options = {}) {
 
 export async function getKeywordCategoryMappings(options = {}) {
   if (shouldUseBlob()) {
-    const text = await getBlobText(KEYWORD_CATEGORY_MAPPINGS_PATH);
-    return text ? normalizeKeywordCategoryMappings(JSON.parse(text)) : emptyKeywordCategoryMappings();
+    const { get, BlobNotFoundError } = await import("@vercel/blob");
+    try {
+      const result = await get(KEYWORD_CATEGORY_MAPPINGS_PATH, { access: BLOB_ACCESS, useCache: false, abortSignal: AbortSignal.timeout(15000) });
+      if (!result) return { ...emptyKeywordCategoryMappings(), revision: null };
+      if (result.statusCode !== 200 || !result.stream || !result.blob?.etag) throw new Error("저장된 카테고리 자료와 버전을 읽지 못했습니다.");
+      const payload = normalizeKeywordCategoryMappings(JSON.parse(await new Response(result.stream).text()));
+      return { ...payload, revision: result.blob.etag };
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) return { ...emptyKeywordCategoryMappings(), revision: null };
+      throw error;
+    }
   }
 
   try {
     const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
     const text = await readFile(join(outputDir, "keyword-category-mappings.json"), "utf8");
-    return normalizeKeywordCategoryMappings(JSON.parse(text));
-  } catch {
-    return emptyKeywordCategoryMappings();
+    return { ...normalizeKeywordCategoryMappings(JSON.parse(text)), revision: createHash("sha256").update(text).digest("hex") };
+  } catch (error) {
+    if (error.code === "ENOENT") return { ...emptyKeywordCategoryMappings(), revision: null };
+    throw error;
   }
 }
 
 export async function saveKeywordCategoryMappings(input, options = {}) {
+  if (!input || !Object.hasOwn(input, "revision") || (input.revision !== null && (typeof input.revision !== "string" || !input.revision))) {
+    const error = new Error("저장 자료의 버전이 없습니다. 카테고리 자료를 새로 불러온 뒤 저장해주세요.");
+    error.status = 428; throw error;
+  }
   const payload = normalizeKeywordCategoryMappings(input);
   payload.updatedAt = new Date().toISOString();
 
   if (shouldUseBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(KEYWORD_CATEGORY_MAPPINGS_PATH, JSON.stringify(payload, null, 2), {
-      access: BLOB_ACCESS,
-      allowOverwrite: true,
-      contentType: "application/json"
-    });
-    return payload;
+    const { put, BlobPreconditionFailedError } = await import("@vercel/blob");
+    const current = await getKeywordCategoryMappings(options);
+    if (current.revision !== input.revision) throw mappingConflict();
+    try {
+      const stored = await put(KEYWORD_CATEGORY_MAPPINGS_PATH, JSON.stringify(payload, null, 2), {
+        access: BLOB_ACCESS, addRandomSuffix: false, contentType: "application/json",
+        abortSignal: AbortSignal.timeout(20000),
+        allowOverwrite: input.revision !== null, ...(input.revision ? { ifMatch: input.revision } : {})
+      });
+      return { ...payload, revision: stored.etag };
+    } catch (error) {
+      if (error instanceof BlobPreconditionFailedError) throw mappingConflict();
+      if (input.revision === null && (await getKeywordCategoryMappings(options)).revision !== null) throw mappingConflict();
+      throw error;
+    }
   }
 
   if (process.env.VERCEL) {
@@ -160,8 +184,28 @@ export async function saveKeywordCategoryMappings(input, options = {}) {
 
   const outputDir = options.outputDir || join(process.cwd(), "data", "settings");
   await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, "keyword-category-mappings.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  return payload;
+  // shortcut: 로컬 서버 한 프로세스의 쓰기를 보호한다. 여러 로컬 프로세스로 운영하면 공유 저장소의 조건부 쓰기를 사용한다.
+  const path = join(outputDir, "keyword-category-mappings.json");
+  if (localMappingWrites.has(path)) throw mappingConflict();
+  localMappingWrites.add(path);
+  const temporaryPath = join(outputDir, `keyword-category-mappings-${randomUUID()}.tmp`);
+  try {
+    const current = await getKeywordCategoryMappings(options);
+    if (current.revision !== input.revision) throw mappingConflict();
+    const text = `${JSON.stringify(payload, null, 2)}\n`;
+    await writeFile(temporaryPath, text, "utf8");
+    await rename(temporaryPath, path);
+    return { ...payload, revision: createHash("sha256").update(text).digest("hex") };
+  } finally {
+    localMappingWrites.delete(path);
+    await unlinkIfExists(temporaryPath);
+  }
+}
+
+function mappingConflict() {
+  const error = new Error("다른 탭에서 카테고리 자료를 변경했습니다. 현재 편집은 유지됩니다. 편집 내용을 확인한 뒤 새로고침해 최신 자료를 불러와주세요.");
+  error.status = 409;
+  return error;
 }
 
 export async function getNaverApiSettings(options = {}) {
@@ -260,61 +304,9 @@ export async function saveHealthProductsIndex(payload, options = {}) {
   return { saved: true, storage: "file" };
 }
 
-export async function getHealthProductDetailChunk(number, options = {}) {
-  const name = `details-${String(number).padStart(4, "0")}.json`;
-  if (shouldUseBlob()) {
-    const text = await getBlobText(`${HEALTH_PRODUCTS_PREFIX}/${name}`);
-    return text ? JSON.parse(text) : [];
-  }
-  try {
-    const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
-    return JSON.parse(await readFile(join(outputDir, name), "utf8"));
-  } catch {
-    return [];
-  }
-}
 
-export async function saveHealthProductDetailChunk(number, items, options = {}) {
-  const name = `details-${String(number).padStart(4, "0")}.json`;
-  if (shouldUseBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(`${HEALTH_PRODUCTS_PREFIX}/${name}`, JSON.stringify(items), { access: BLOB_ACCESS, allowOverwrite: true, contentType: "application/json" });
-    return { saved: true, storage: "blob" };
-  }
-  if (process.env.VERCEL) return { saved: false, storage: "none", reason: "Blob credentials are not configured." };
-  const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, name), `${JSON.stringify(items)}\n`, "utf8");
-  return { saved: true, storage: "file" };
-}
 
-export async function getHealthProductSearchChunk(number, options = {}) {
-  const name = `search-${String(number).padStart(4, "0")}.json`;
-  if (shouldUseBlob()) {
-    const text = await getBlobText(`${HEALTH_PRODUCTS_PREFIX}/${name}`);
-    return text ? JSON.parse(text) : [];
-  }
-  try {
-    const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
-    return JSON.parse(await readFile(join(outputDir, name), "utf8"));
-  } catch {
-    return [];
-  }
-}
 
-export async function saveHealthProductSearchChunk(number, items, options = {}) {
-  const name = `search-${String(number).padStart(4, "0")}.json`;
-  if (shouldUseBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(`${HEALTH_PRODUCTS_PREFIX}/${name}`, JSON.stringify(items), { access: BLOB_ACCESS, allowOverwrite: true, contentType: "application/json" });
-    return { saved: true, storage: "blob" };
-  }
-  if (process.env.VERCEL) return { saved: false, storage: "none", reason: "Blob credentials are not configured." };
-  const outputDir = options.outputDir || join(process.cwd(), "data", "health-products");
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(join(outputDir, name), `${JSON.stringify(items)}\n`, "utf8");
-  return { saved: true, storage: "file" };
-}
 
 function shouldUseBlob() {
   return hasBlobCredentials();

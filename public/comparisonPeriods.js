@@ -81,21 +81,36 @@ export function buildKeywordRankChanges(points) {
 }
 
 function aggregateRankingPeriod(definition, sourceReports) {
+  const rows = aggregateRankingRows(sourceReports);
+  return {
+    month: definition.key,
+    comparisonLabel: definition.label,
+    startDate: definition.startDate,
+    endDate: definition.endDate,
+    count: rows.length,
+    rows,
+    sourceMonthCount: sourceReports.length,
+    categoryPath: sourceReports.at(-1)?.categoryPath || []
+  };
+}
+
+export function aggregateRankingRows(sourceReports) {
   const reportMaps = sourceReports.map((report) => new Map(
     (report.rows || [])
       .map((row) => [normalizeText(row.keyword), row])
       .filter(([key]) => key)
   ));
   const keys = new Set(reportMaps.flatMap((rows) => [...rows.keys()]));
-  const rankedRows = [...keys].map((key) => {
+  return [...keys].map((key) => {
     const points = reportMaps.map((rows) => rows.get(key) || null);
     const ranks = points.map((row) => row ? Number(row.rank) : 501);
-    const keyword = [...points].reverse().find(Boolean)?.keyword || key;
+    const latest = [...points].reverse().find(Boolean);
     return {
-      keyword,
+      keyword: latest?.keyword || key,
+      categories: latest?.categories || [],
       averageMonthlyRank: ranks.reduce((sum, rank) => sum + rank, 0) / ranks.length,
       presentMonthCount: points.filter(Boolean).length,
-      latestMonthlyRank: Number([...points].reverse().find(Boolean)?.rank || 501)
+      latestMonthlyRank: Number(latest?.rank || 501)
     };
   }).sort((a, b) =>
     a.averageMonthlyRank - b.averageMonthlyRank
@@ -103,23 +118,11 @@ function aggregateRankingPeriod(definition, sourceReports) {
     || a.latestMonthlyRank - b.latestMonthlyRank
     || a.keyword.localeCompare(b.keyword, "ko")
   ).slice(0, 500).map((row, index) => ({
+    ...row,
     rank: index + 1,
-    keyword: row.keyword,
     dailyAverageRatio: 0,
-    averageMonthlyRank: Number(row.averageMonthlyRank.toFixed(3)),
-    presentMonthCount: row.presentMonthCount
+    averageMonthlyRank: Number(row.averageMonthlyRank.toFixed(3))
   }));
-
-  return {
-    month: definition.key,
-    comparisonLabel: definition.label,
-    startDate: definition.startDate,
-    endDate: definition.endDate,
-    count: rankedRows.length,
-    rows: rankedRows,
-    sourceMonthCount: sourceReports.length,
-    categoryPath: sourceReports.at(-1)?.categoryPath || []
-  };
 }
 
 function normalizeText(value) { return String(value || '').trim().toLowerCase().replace(/\s+/g, ''); }

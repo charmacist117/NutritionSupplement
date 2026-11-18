@@ -1,10 +1,12 @@
 import { getNaverCredentialProfiles } from "../src/naverShoppingInsight.js";
 import { getNaverApiSettings, saveNaverApiSettings } from "../src/storage.js";
+import { requireAdmin } from "../src/adminAuth.js";
 
 export default async function handler(request, response) {
   if (!["GET", "PUT"].includes(request.method)) return response.status(405).json({ error: "Method not allowed" });
 
   try {
+    if (request.method === "PUT") requireAdmin(request);
     const profiles = getNaverCredentialProfiles();
     let settings = await getNaverApiSettings();
 
@@ -27,6 +29,6 @@ export default async function handler(request, response) {
       secretStorage: "vercel-environment-variables"
     });
   } catch (error) {
-    response.status(500).json({ error: error.message || "네이버 API 설정을 불러오지 못했습니다." });
+    response.status(error.status || 500).json({ error: error.message || "네이버 API 설정을 불러오지 못했습니다." });
   }
 }

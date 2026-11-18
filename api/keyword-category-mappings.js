@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { getKeywordCategoryMappings, saveKeywordCategoryMappings } from "../src/storage.js";
+import { requireAdmin } from "../src/adminAuth.js";
 
 export default async function handler(request, response) {
   if (request.method !== "GET" && request.method !== "POST") {
@@ -7,6 +8,8 @@ export default async function handler(request, response) {
   }
 
   try {
+    response.setHeader("Cache-Control", "no-store");
+    if (request.method === "POST") requireAdmin(request);
     const options = process.env.VERCEL ? {} : { outputDir: join(process.cwd(), "data", "settings") };
 
     if (request.method === "GET") {
@@ -18,7 +21,7 @@ export default async function handler(request, response) {
     const saved = await saveKeywordCategoryMappings(body, options);
     return response.status(200).json(saved);
   } catch (error) {
-    return response.status(500).json({
+    return response.status(error.status || 500).json({
       error: error.message || "Keyword category mappings request failed."
     });
   }

@@ -3,6 +3,11 @@ import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview
 import { MAX_CATEGORY_ASSIGNMENTS, normalizeAssignedCategories, categoryMappingRecord } from "./categoryAssignments.js";
 
 const statusText = document.querySelector("#status");
+const adminStatus = document.querySelector("#admin-status");
+const adminLoginForm = document.querySelector("#admin-login-form");
+const adminPassword = document.querySelector("#admin-password");
+const adminLoginButton = document.querySelector("#admin-login");
+const adminLogoutButton = document.querySelector("#admin-logout");
 const monthList = document.querySelector("#month-list");
 const reportTitle = document.querySelector("#report-title");
 const reportMeta = document.querySelector("#report-meta");
@@ -164,6 +169,11 @@ let currentReport = null;
 let reportKeys = [];
 let reportCache = new Map();
 let categoryMappings = new Map();
+let categoryMappingsLoaded = false;
+let categorySaveInFlight = false;
+let mappingDirty = false;
+let mappingRevision = null;
+let adminAuthenticated = false;
 let productCategories = [...DEFAULT_PRODUCT_CATEGORIES];
 let categoryAliases = new Map();
 let mappingRows = [];
@@ -227,7 +237,8 @@ saveReportButton.addEventListener("click", async () => {
 });
 
 mappingRefreshButton.addEventListener("click", async () => {
-  await renderMappingSheet({ refreshReports: true });
+  if (mappingDirty && !window.confirm("저장하지 않은 분류 편집을 버리고 최신 자료를 불러올까요?")) return;
+  if (await loadCategoryMappings()) await renderMappingSheet({ refreshReports: true });
 });
 
 mappingApplySuggestionsButton.addEventListener("click", () => applyNewKeywordSuggestions());
@@ -316,7 +327,7 @@ ingredientsSyncButton.addEventListener("click", async () => {
   ingredientsSyncButton.disabled = true;
   ingredientsStatus.textContent = "식품안전나라 전체 원료 자료를 동기화하고 저장하는 중입니다.";
   try {
-    const response = await fetch("/api/individual-ingredients", { method: "POST" });
+    const response = await adminRequest("/api/individual-ingredients", { method: "POST" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "원료 자료를 저장하지 못했습니다.");
     ingredientsLoaded = true;
@@ -379,7 +390,7 @@ collectForm.addEventListener("submit", async (event) => {
   statusText.textContent = "선택한 기간의 데이터를 수집하는 중입니다.";
 
   try {
-    const response = await fetch("/api/collect-monthly", {
+    const response = await adminRequest("/api/collect-monthly", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -408,9 +419,58 @@ collectForm.addEventListener("submit", async (event) => {
   }
 });
 
+adminLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  adminLoginButton.disabled = true;
+  try {
+    const response = await fetch("/api/admin-session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: adminPassword.value })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "로그인에 실패했습니다.");
+    adminPassword.value = "";
+    showAdminSession(data);
+  } catch (error) { adminStatus.textContent = error.message; }
+  finally { adminLoginButton.disabled = false; }
+});
+adminLogoutButton.addEventListener("click", async () => {
+  const response = await fetch("/api/admin-session", { method: "DELETE" });
+  if (response.ok) showAdminSession(await response.json());
+});
+
+await loadAdminSession();
 await loadHealth();
 await loadCategoryMappings();
 await loadMonths();
+
+async function loadAdminSession() {
+  try {
+    const response = await fetch("/api/admin-session", { cache: "no-store" });
+    if (!response.ok) throw new Error("로그인 상태를 확인하지 못했습니다. 새로고침해주세요.");
+    showAdminSession(await response.json());
+  } catch (error) { adminStatus.textContent = error.message; }
+}
+
+function showAdminSession(session) {
+  adminAuthenticated = session.authenticated;
+  adminStatus.textContent = adminAuthenticated ? "관리자로 로그인했습니다. 로그인은 8시간 유지됩니다."
+    : session.configured ? "저장·삭제·수집과 보고서 생성은 관리자 로그인 후 이용할 수 있습니다."
+    : "관리자 비밀번호 설정이 필요합니다. Vercel에 ADMIN_PASSWORD를 16자 이상으로 등록해주세요.";
+  adminLoginForm.hidden = adminAuthenticated;
+  adminLogoutButton.hidden = !adminAuthenticated;
+  updateMappingEditorState();
+}
+
+async function adminRequest(url, options) {
+  if (!adminAuthenticated) {
+    adminPassword.focus();
+    throw new Error("상단에서 관리자 로그인 후 다시 시도해주세요.");
+  }
+  const response = await fetch(url, options);
+  if (response.status === 401) showAdminSession({ configured: true, authenticated: false });
+  return response;
+}
 
 async function loadHealth() {
   try {
@@ -491,7 +551,7 @@ async function saveActiveApiProfile() {
   apiProfileSaveButton.disabled = true;
   apiSettingsStatus.textContent = "활성 프로필을 저장하는 중입니다.";
   try {
-    const response = await fetch("/api/naver-api-settings", {
+    const response = await adminRequest("/api/naver-api-settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ activeProfile: apiActiveProfile.value })
@@ -845,7 +905,7 @@ async function saveCurrentReport() {
   statusText.textContent = `${periodLabel(currentReport)} 리포트를 저장하는 중입니다.`;
 
   try {
-    const response = await fetch("/api/monthly-report", {
+    const response = await adminRequest("/api/monthly-report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentReport)
@@ -878,7 +938,7 @@ async function deleteReport(month) {
   statusText.textContent = `${label} 리포트를 삭제하는 중입니다.`;
 
   try {
-    const response = await fetch(`/api/monthly-report?month=${encodeURIComponent(month)}`, {
+    const response = await adminRequest(`/api/monthly-report?month=${encodeURIComponent(month)}`, {
       method: "DELETE"
     });
     const result = await readJsonResponse(response);
@@ -1105,16 +1165,24 @@ async function fetchReport(month) {
 
 async function loadCategoryMappings() {
   try {
-    const response = await fetch("/api/keyword-category-mappings");
-    if (!response.ok) return;
-
-    setCategoryMappings(await response.json());
-  } catch {
-    categoryMappings = new Map();
+    const response = await fetch("/api/keyword-category-mappings", { cache: "no-store" });
+    if (!response.ok) throw new Error("저장된 카테고리를 불러오지 못했습니다. 새로고침 버튼으로 다시 시도해주세요.");
+    const data = await response.json();
+    if (!Object.hasOwn(data, "revision")) throw new Error("카테고리 자료 버전을 확인하지 못했습니다. 페이지를 새로고침해주세요.");
+    setCategoryMappings(data);
+    return true;
+  } catch (error) {
+    categoryMappingsLoaded = false;
+    mappingStatus.textContent = error.message;
+    updateMappingEditorState();
+    return false;
   }
 }
 
 function setCategoryMappings(data) {
+  mappingRevision = data.revision;
+  categoryMappingsLoaded = true;
+  mappingDirty = false;
   categoryMappings = new Map();
   categoryAliases = new Map(
     Object.entries(data?.categoryAliases || {})
@@ -1140,6 +1208,11 @@ function setCategoryMappings(data) {
 }
 
 async function renderMappingSheet(options = {}) {
+  if (!categoryMappingsLoaded) {
+    mappingBody.innerHTML = '<tr><td colspan="7">카테고리 자료를 불러오지 못했습니다. 새로고침 버튼으로 다시 시도해주세요.</td></tr>';
+    updateMappingEditorState();
+    return;
+  }
   updateCategoryManagerOptions();
   if (!reportKeys.length) {
     mappingRows = [];
@@ -1162,7 +1235,7 @@ async function renderMappingSheet(options = {}) {
     renderMappingRows();
   } finally {
     mappingRefreshButton.disabled = false;
-    mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
+    updateMappingEditorState();
   }
 }
 
@@ -1271,6 +1344,7 @@ function renderMappingRows() {
   }
 
   mappingBody.append(fragment);
+  updateMappingEditorState();
 }
 
 function mappingReviewHtml(review, mapped) {
@@ -1324,6 +1398,7 @@ function createCategorySearchGroup(keyword) {
 }
 
 function commitCategorySearch(keyword, slot, input, inputs) {
+  if (categorySaveInFlight || !categoryMappingsLoaded || !adminAuthenticated) return;
   const query = String(input.value || "").trim();
   const category = query ? resolveCategorySearch(query) : "";
   if (query && !category) {
@@ -1348,7 +1423,7 @@ function commitCategorySearch(keyword, slot, input, inputs) {
   renderMappingSummary();
   const mappedCount = mappingRows.filter((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 3).length;
   mappingStatus.textContent = `총 ${mappingRows.length}개 · 분류 완료 ${mappedCount}개 · 저장 필요`;
-  mappingApplySuggestionsButton.disabled = !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
+  updateMappingEditorState();
 }
 
 function syncCategorySearchInputs(keyword, inputs) {
@@ -1374,6 +1449,7 @@ function resolveCategorySearch(value) {
 }
 
 function updateCategoryMapping(keyword, category, slot = 0) {
+  mappingDirty = true;
   const key = normalizeText(keyword);
   if (!key) return;
 
@@ -1389,11 +1465,9 @@ function updateCategoryMapping(keyword, category, slot = 0) {
 }
 
 async function saveCategoryMappingsFromSheet() {
-  mappingSaveButton.disabled = true;
-  categoryAddButton.disabled = true;
-  categoryRenameButton.disabled = true;
-  categoryDeleteButton.disabled = true;
-  updateCategoryOrderButtons();
+  if (!categoryMappingsLoaded || categorySaveInFlight || !adminAuthenticated) return;
+  categorySaveInFlight = true;
+  updateMappingEditorState();
   mappingStatus.textContent = "카테고리 매칭을 저장하는 중입니다.";
 
   try {
@@ -1405,8 +1479,7 @@ async function saveCategoryMappingsFromSheet() {
   } catch (error) {
     mappingStatus.textContent = error.message;
   } finally {
-    mappingSaveButton.disabled = false;
-    categoryAddButton.disabled = false;
+    categorySaveInFlight = false;
     updateCategoryManagerOptions();
   }
 }
@@ -1415,11 +1488,12 @@ async function persistCategoryMappings() {
   const mappings = [...categoryMappings.values()]
     .filter((item) => item.keyword && item.category)
     .sort((a, b) => a.keyword.localeCompare(b.keyword, "ko"));
-  const response = await fetch("/api/keyword-category-mappings", {
+  const response = await adminRequest("/api/keyword-category-mappings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       categories: productCategories,
+      revision: mappingRevision,
       categoryAliases: Object.fromEntries(categoryAliases),
       mappings
     })
@@ -1476,10 +1550,21 @@ function updateCategoryManagerOptions(preferredCategory = "") {
 
   categoryManageSelect.value = productCategories.includes(current) ? current : productCategories[0] || "";
   if (preferredCategory || previous !== categoryManageSelect.value) categoryRenameInput.value = categoryManageSelect.value;
-  categoryRenameButton.disabled = !productCategories.length;
-  categoryDeleteButton.disabled = productCategories.length <= 1;
   categoryOrderList.value = productCategories.includes(ordering) ? ordering : productCategories[0] || "";
-  categoryOrderList.disabled = !productCategories.length;
+  updateMappingEditorState();
+}
+
+function updateMappingEditorState() {
+  const blocked = !adminAuthenticated || !categoryMappingsLoaded || categorySaveInFlight;
+  mappingSaveButton.disabled = blocked;
+  mappingRefreshButton.disabled = categorySaveInFlight;
+  for (const control of document.querySelectorAll(".category-manager input, .category-manager select, .category-manager button, #mapping-body input, #mapping-body button")) {
+    control.disabled = blocked;
+  }
+  categoryRenameButton.disabled = blocked || !productCategories.length;
+  categoryDeleteButton.disabled = blocked || productCategories.length <= 1;
+  categoryOrderList.disabled = blocked || !productCategories.length;
+  mappingApplySuggestionsButton.disabled = blocked || !newKeywordRows.some((row) => mappingReview(manualCategoriesFor(row.keyword), autoProductCategorySuggestionsFor(row.keyword)).priority === 2);
   updateCategoryOrderButtons();
 }
 
@@ -1501,6 +1586,7 @@ function moveProductCategory(direction) {
 
   const [category] = productCategories.splice(index, 1);
   productCategories.splice(destination, 0, category);
+  mappingDirty = true;
   updateCategoryManagerOptions();
   categoryOrderStatus.textContent = `${category}을(를) ${destination + 1}번째로 옮겼습니다. 변경사항 저장을 눌러 확정해주세요.`;
 }
@@ -1519,6 +1605,7 @@ function addProductCategory() {
   }
 
   productCategories.push(category);
+  mappingDirty = true;
   categoryAddInput.value = "";
   updateCategoryManagerOptions(category);
   renderMappingSummary();
@@ -1538,6 +1625,7 @@ function renameProductCategory() {
   }
 
   productCategories = productCategories.map((category) => category === previous ? next : category);
+  mappingDirty = true;
   for (const [key, item] of categoryMappings) {
     const categories = mappingCategoriesFromItem(item).map((category) => category === previous ? next : category);
     categoryMappings.set(key, categoryMappingRecord(item.keyword, categories));
@@ -1569,6 +1657,7 @@ function deleteProductCategory() {
   if (!confirmed) return;
 
   productCategories = productCategories.filter((item) => item !== category);
+  mappingDirty = true;
   for (const [key, item] of categoryMappings) {
     const categories = mappingCategoriesFromItem(item).filter((itemCategory) => itemCategory !== category);
     if (categories.length) categoryMappings.set(key, categoryMappingRecord(item.keyword, categories));
@@ -2320,6 +2409,7 @@ function updateExecutiveReportState() {
 
 async function downloadExecutivePdf() {
   if (executivePdfDownloadButton.disabled) return;
+  let failureMessage = "";
   const baselineKeys = chronologicalReportKeys([...executiveBaselineKeys]);
   const currentKeys = chronologicalReportKeys([...executiveCurrentKeys]);
   executivePdfDownloadButton.disabled = true;
@@ -2332,7 +2422,9 @@ async function downloadExecutivePdf() {
       Promise.all(baselineKeys.map((key) => fetchReport(key))),
       Promise.all(currentKeys.map((key) => fetchReport(key)))
     ]);
-    const prepareReports = (reports) => reports.filter(Boolean).map((report) => ({
+    const missing = [...baselineKeys.filter((key, index) => !baselineReports[index]), ...currentKeys.filter((key, index) => !currentReports[index])];
+    if (missing.length) throw new Error(`선택한 기간 자료를 불러오지 못했습니다: ${missing.map(periodLabel).join(", ")}. 다시 시도해주세요.`);
+    const prepareReports = (reports) => reports.map((report) => ({
       month: report.month,
       startDate: report.startDate,
       endDate: report.endDate,
@@ -2342,7 +2434,7 @@ async function downloadExecutivePdf() {
         categories: productCategoriesFor(row.keyword)
       }))
     }));
-    const response = await fetch("/api/executive-report", {
+    const response = await adminRequest("/api/executive-report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2366,10 +2458,11 @@ async function downloadExecutivePdf() {
     URL.revokeObjectURL(url);
     executiveReportStatus.textContent = "경영진 인사이트 PDF를 생성했습니다.";
   } catch (error) {
-    executiveReportStatus.textContent = error.message;
+    failureMessage = error.message;
   } finally {
     executivePdfDownloadButton.textContent = originalText;
     updateExecutiveReportState();
+    if (failureMessage) executiveReportStatus.textContent = failureMessage;
   }
 }
 
@@ -2812,7 +2905,7 @@ async function downloadComparisonPdf() {
   const originalText = comparisonPdfDownloadButton.textContent;
   comparisonPdfDownloadButton.textContent = "PDF 작성 중";
   try {
-    const response = await fetch("/api/comparison-report", {
+    const response = await adminRequest("/api/comparison-report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ html: buildComparisonPdfHtml() })
@@ -3385,18 +3478,7 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function rankChangeFormula(rowNumber) {
-  return `=IFERROR(XLOOKUP(B${rowNumber},$O:$O,$N:$N)-A${rowNumber},"-")`;
-}
 
-function categoryTotalFormula(rowNumber, source) {
-  const categoryCell = `S${rowNumber}`;
-  if (source === "previous") {
-    return `=IF(${categoryCell}="총합계",SUM($P:$P),SUMPRODUCT(--($Q$2:$Q$501=${categoryCell}),$P$2:$P$501))`;
-  }
-
-  return `=IF(${categoryCell}="총합계",SUM($C:$C),SUMPRODUCT(--($H$2:$H$501=${categoryCell}),$C$2:$C$501))`;
-}
 
 function reportEndDate(report) {
   return report.endDate || reportKeyEndDate(report.month || selectedMonth) || "";
@@ -3410,54 +3492,4 @@ function reportKeyEndDate(key) {
   }
 
   return value.match(/^\d{4}-\d{2}-\d{2}_(\d{4}-\d{2}-\d{2})$/)?.[1] || "";
-}
-
-function productGroupFormula(rowNumber, column = "B") {
-  const cell = `${column}${rowNumber}`;
-  return `=LET(kw,${cell},IFS(` +
-    `ISNUMBER(SEARCH("오메가",kw)),"오메가3",` +
-    `ISNUMBER(SEARCH("마그네슘",kw)),"마그네슘",` +
-    `AND(NOT(OR(ISNUMBER(SEARCH("엘레나",kw)),ISNUMBER(SEARCH("펨",kw)),ISNUMBER(SEARCH("질",kw)),ISNUMBER(SEARCH("구강",kw)))),OR(ISNUMBER(SEARCH("유산균",kw)),ISNUMBER(SEARCH("락토핏",kw)),ISNUMBER(SEARCH("프로바이오틱스",kw)),ISNUMBER(SEARCH("드시모네",kw)),ISNUMBER(SEARCH("자로우",kw)))),"유산균",` +
-    `OR(ISNUMBER(SEARCH("프리바이오틱스",kw)),ISNUMBER(SEARCH("푸룬",kw)),ISNUMBER(SEARCH("낙산균",kw))),"장 건강",` +
-    `OR(ISNUMBER(SEARCH("비타민c",kw)),ISNUMBER(SEARCH("압타민c",kw))),"비타민c",` +
-    `OR(ISNUMBER(SEARCH("비타민d",kw)),ISNUMBER(SEARCH("비타민k",kw))),"비타민dk",` +
-    `AND(OR(ISNUMBER(SEARCH("비타민",kw)),ISNUMBER(SEARCH("비타",kw)),ISNUMBER(SEARCH("오쏘몰",kw)),ISNUMBER(SEARCH("센트룸",kw))),NOT(OR(ISNUMBER(SEARCH("비타민c",kw)),ISNUMBER(SEARCH("압타민c",kw)),ISNUMBER(SEARCH("비타민d",kw)),ISNUMBER(SEARCH("비타민k",kw))))),"비타민 류",` +
-    `OR(ISNUMBER(SEARCH("이뮨",kw)),ISNUMBER(SEARCH("아연",kw)),ISNUMBER(SEARCH("베타글루칸",kw))),"면역 건강",` +
-    `OR(ISNUMBER(SEARCH("콘드로이친",kw)),ISNUMBER(SEARCH("msm",kw)),ISNUMBER(SEARCH("난각막",kw)),ISNUMBER(SEARCH("NEM",kw)),ISNUMBER(SEARCH("관절",kw)),ISNUMBER(SEARCH("보스",kw)),ISNUMBER(SEARCH("호관원",kw)),ISNUMBER(SEARCH("옵티머스트",kw)),ISNUMBER(SEARCH("우슬",kw)),ISNUMBER(SEARCH("무브프리",kw)),ISNUMBER(SEARCH("글루코사민",kw))),"관절 건강",` +
-    `OR(ISNUMBER(SEARCH("멜라토닌",kw)),ISNUMBER(SEARCH("수면",kw))),"수면 건강",` +
-    `OR(ISNUMBER(SEARCH("루테인",kw)),ISNUMBER(SEARCH("블루베리",kw)),ISNUMBER(SEARCH("빌베리",kw)),ISNUMBER(SEARCH("눈",kw)),ISNUMBER(SEARCH("아스타잔틴",kw))),"눈 건강",` +
-    `ISNUMBER(SEARCH("글루타치온",kw)),"미백",` +
-    `OR(ISNUMBER(SEARCH("nmn",kw)),ISNUMBER(SEARCH("엔엠엔",kw)),ISNUMBER(SEARCH("mnm",kw))),"항노화",` +
-    `OR(ISNUMBER(SEARCH("프로폴리스",kw)),ISNUMBER(SEARCH("커큐민",kw)),ISNUMBER(SEARCH("퀘르세틴",kw)),ISNUMBER(SEARCH("브로멜라인",kw)),ISNUMBER(SEARCH("강황",kw)),ISNUMBER(SEARCH("테라큐민",kw)),ISNUMBER(SEARCH("울금",kw))),"항염증",` +
-    `ISNUMBER(SEARCH("철분",kw)),"철분제",` +
-    `OR(ISNUMBER(SEARCH("비오틴",kw)),ISNUMBER(SEARCH("케라넷",kw)),ISNUMBER(SEARCH("맥주",kw))),"모발 건강",` +
-    `ISNUMBER(SEARCH("효소",kw)),"효소식품",` +
-    `OR(ISNUMBER(SEARCH("코엔자임",kw)),ISNUMBER(SEARCH("코큐텐",kw))),"코엔자임Q10",` +
-    `OR(ISNUMBER(SEARCH("셀렌",kw)),ISNUMBER(SEARCH("셀레늄",kw))),"항산화",` +
-    `OR(ISNUMBER(SEARCH("정관장",kw)),ISNUMBER(SEARCH("홍삼",kw)),ISNUMBER(SEARCH("에브리타임",kw)),ISNUMBER(SEARCH("산삼",kw)),ISNUMBER(SEARCH("장뇌삼",kw)),ISNUMBER(SEARCH("홍이장군",kw)),ISNUMBER(SEARCH("인삼",kw))),"삼(蔘) 류",` +
-    `OR(ISNUMBER(SEARCH("바나바",kw)),ISNUMBER(SEARCH("뉴케어",kw)),ISNUMBER(SEARCH("애사비",kw))),"혈당",` +
-    `OR(ISNUMBER(SEARCH("알부민",kw)),ISNUMBER(SEARCH("펩티드",kw))),"단백질",` +
-    `OR(ISNUMBER(SEARCH("아르기닌",kw)),ISNUMBER(SEARCH("마카",kw)),ISNUMBER(SEARCH("쏘팔",kw)),ISNUMBER(SEARCH("옥타",kw)),ISNUMBER(SEARCH("전립",kw)),ISNUMBER(SEARCH("장어",kw)),ISNUMBER(SEARCH("카리토",kw)),ISNUMBER(SEARCH("야관문",kw))),"남성 건강",` +
-    `OR(ISNUMBER(SEARCH("밀크씨슬",kw)),ISNUMBER(SEARCH("밀크시슬",kw)),ISNUMBER(SEARCH("간",kw))),"간 건강",` +
-    `OR(ISNUMBER(SEARCH("이노시톨",kw)),ISNUMBER(SEARCH("엽산",kw)),ISNUMBER(SEARCH("엘레나",kw)),ISNUMBER(SEARCH("펨",kw)),ISNUMBER(SEARCH("질",kw))),"여성 건강",` +
-    `OR(ISNUMBER(SEARCH("도라지",kw)),ISNUMBER(SEARCH("맥문동",kw))),"호흡기 건강",` +
-    `ISNUMBER(SEARCH("홍국",kw)),"콜레스테롤",` +
-    `OR(ISNUMBER(SEARCH("폴리코사놀",kw)),ISNUMBER(SEARCH("리놀렌산",kw)),ISNUMBER(SEARCH("대마종자",kw)),ISNUMBER(SEARCH("솔잎증류",kw)),ISNUMBER(SEARCH("송침",kw)),ISNUMBER(SEARCH("보라지",kw)),ISNUMBER(SEARCH("콜레스테롤",kw)),ISNUMBER(SEARCH("순환",kw)),ISNUMBER(SEARCH("은행잎",kw))),"혈행 건강",` +
-    `ISNUMBER(SEARCH("갱년기",kw)),"갱년기 건강",` +
-    `OR(ISNUMBER(SEARCH("매스틱",kw)),ISNUMBER(SEARCH("감초",kw))),"위 건강",` +
-    `OR(ISNUMBER(SEARCH("포스파티딜",kw)),ISNUMBER(SEARCH("테아닌",kw)),ISNUMBER(SEARCH("홍경천",kw)),ISNUMBER(SEARCH("뇌",kw))),"뇌 건강",` +
-    `ISNUMBER(SEARCH("꿀",kw)),"꿀",` +
-    `ISNUMBER(SEARCH("흑염소",kw)),"수족냉증",` +
-    `OR(ISNUMBER(SEARCH("베르베린",kw)),ISNUMBER(SEARCH("bnr",kw)),ISNUMBER(SEARCH("비에날",kw)),ISNUMBER(SEARCH("비엔알",kw)),ISNUMBER(SEARCH("알파 cd",kw)),ISNUMBER(SEARCH("알파cd",kw))),"다이어트",` +
-    `OR(ISNUMBER(SEARCH("숙취",kw)),ISNUMBER(SEARCH("벌나무",kw))),"숙취해소",` +
-    `OR(ISNUMBER(SEARCH("칼마디",kw)),ISNUMBER(SEARCH("mbp",kw)),ISNUMBER(SEARCH("칼슘",kw))),"뼈 건강",` +
-    `OR(ISNUMBER(SEARCH("침향환",kw)),ISNUMBER(SEARCH("경옥고",kw)),ISNUMBER(SEARCH("공진단",kw)),ISNUMBER(SEARCH("공진당",kw))),"피로회복",` +
-    `OR(ISNUMBER(SEARCH("삼백초",kw)),ISNUMBER(SEARCH("노즈",kw))),"코 건강",` +
-    `OR(ISNUMBER(SEARCH("구강",kw)),ISNUMBER(SEARCH("덴티",kw))),"구강 건강",` +
-    `TRUE,"기타"))`;
-}
-
-function targetGroupFormula(rowNumber) {
-  const cell = `B${rowNumber}`;
-  return `=LET(t,${cell},child,OR(ISNUMBER(SEARCH("어린이",t)),ISNUMBER(SEARCH("키즈",t)),ISNUMBER(SEARCH("마이타민",t)),AND(ISNUMBER(SEARCH("키",t)),NOT(ISNUMBER(SEARCH("키나제",t)))),ISNUMBER(SEARCH("아이키",t)),AND(ISNUMBER(SEARCH("아이클",t)),SUM(--ISNUMBER(SEARCH({"아이클리어","아이클린"},t)))=0)),baby,SUM(--ISNUMBER(SEARCH({"유아","신생아","아기"},t)))>0,preg,SUM(--ISNUMBER(SEARCH({"임산부","엽산"},t)))>0,female,ISNUMBER(SEARCH("질",t)),family,ISNUMBER(SEARCH("맘",t)),absorption,SUM(--ISNUMBER(SEARCH({"하이퍼셀","아쿠아셀"},t))),IF(child,"어린이",IF(baby,"아기",IF(preg,"임산부",IF(female,"여성",IF(absorption,"흡수율",IF(family,"가족","")))))))`;
 }

@@ -1,6 +1,11 @@
 import { deleteMonthlyReport, getMonthlyReport, saveMonthlyReport } from "../src/storage.js";
+import { requireAdmin } from "../src/adminAuth.js";
 
 export default async function handler(request, response) {
+  if (["POST", "DELETE"].includes(request.method)) {
+    try { requireAdmin(request); }
+    catch (error) { return response.status(error.status).json({ error: error.message }); }
+  }
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "DELETE") {
     return response.status(405).json({ error: "Method not allowed" });
   }

@@ -13,6 +13,7 @@ import { fetchHealthProductDetailLive, fetchHealthProductTypesLive } from "./hea
 import { searchHealthProducts } from "./productTypeCatalog.js";
 import { getHealthProductExport, sendHealthProductExport } from "./healthProductExport.js";
 import { fetchFoodsafetyProductDetail } from "./foodsafetyApi.js";
+import { requireAdmin, handleAdminSession } from "./adminAuth.js";
 
 const rootDir = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const publicDir = join(rootDir, "public");
@@ -24,6 +25,16 @@ const port = Number(process.env.PORT || 3010);
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
+    if (url.pathname === "/api/admin-session") {
+      request.body = request.method === "POST" ? await readJson(request) : {};
+      const adapter = {
+        setHeader: (name, value) => response.setHeader(name, value),
+        status(code) { this.code = code; return this; },
+        json(body) { return sendJson(response, this.code, body); }
+      };
+      return handleAdminSession(request, adapter);
+    }
+    if (url.pathname.startsWith("/api/") && ["POST", "PUT", "DELETE"].includes(request.method)) requireAdmin(request);
 
     if (request.method === "GET" && url.pathname === "/api/health") {
       const naverCredentialCount = safeNaverCredentialCount();
@@ -39,6 +50,7 @@ const server = createServer(async (request, response) => {
         naverActiveProfileLabel: profiles.find((item) => item.profile === activeProfile)?.label || "",
         naverActiveCredentialCount: getNaverCredentialPool(process.env, activeProfile).length,
         blobConfigured: hasBlobCredentials(),
+        cronConfigured: Boolean(process.env.CRON_SECRET),
         category: HEALTH_FOOD_CATEGORY
       });
     }
@@ -172,6 +184,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/keyword-category-mappings") {
+      response.setHeader("Cache-Control", "no-store");
       const options = { outputDir: join(rootDir, "data", "settings") };
       if (request.method === "GET") {
         const mappings = await getKeywordCategoryMappings(options);

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { collectMonthlyNutritionKeywords, normalizeCollectionRange, previousMonthRange } from "../src/monthlyCollector.js";
 import { getNaverCredentialPool, getNaverCredentialProfiles } from "../src/naverShoppingInsight.js";
 import { getNaverApiSettings } from "../src/storage.js";
+import { requireAdmin, requireCron } from "../src/adminAuth.js";
 
 export const config = {
   maxDuration: 300
@@ -12,13 +13,9 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: "Method not allowed" });
   }
 
-  const isVercelCron = String(request.headers["user-agent"] || "").includes("vercel-cron");
-  const isAuthorized = request.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
-  if (request.method === "GET" && process.env.CRON_SECRET && !isVercelCron && !isAuthorized) {
-    return response.status(401).json({ error: "Unauthorized" });
-  }
-
   try {
+    if (request.method === "GET") requireCron(request);
+    else requireAdmin(request);
     const body = parseBody(request.body);
     const range = request.method === "POST" && body.startDate && body.endDate
       ? normalizeCollectionRange({ startDate: body.startDate, endDate: body.endDate })

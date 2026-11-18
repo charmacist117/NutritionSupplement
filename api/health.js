@@ -23,6 +23,7 @@ export default async function handler(request, response) {
     naverActiveProfileLabel: profiles.find((item) => item.profile === activeProfile)?.label || "",
     naverActiveCredentialCount: getNaverCredentialPool(process.env, activeProfile).length,
     blobConfigured: hasBlobCredentials(),
+    cronConfigured: Boolean(process.env.CRON_SECRET),
     category: HEALTH_FOOD_CATEGORY
   });
 }

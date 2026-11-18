@@ -1,5 +1,6 @@
 import { getHealthFunctionalIngredients, saveHealthFunctionalIngredients } from "../src/storage.js";
 import { pageHealthFunctionalIngredients, syncHealthFunctionalIngredients } from "../src/individualIngredients.js";
+import { requireAdmin } from "../src/adminAuth.js";
 
 export const config = { maxDuration: 60 };
 
@@ -13,6 +14,7 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "POST") {
+      requireAdmin(request);
       const synced = await syncHealthFunctionalIngredients();
       const storage = await saveHealthFunctionalIngredients(synced);
       return storage.saved
@@ -22,6 +24,6 @@ export default async function handler(request, response) {
 
     return response.status(405).json({ error: "Method not allowed" });
   } catch (error) {
-    return response.status(502).json({ error: error.message || "식품안전나라 원료 자료를 동기화하지 못했습니다." });
+    return response.status(error.status || 502).json({ error: error.message || "식품안전나라 원료 자료를 동기화하지 못했습니다." });
   }
 }

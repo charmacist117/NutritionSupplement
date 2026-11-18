@@ -3,6 +3,7 @@ import "./checkCategoryAssignments.js";
 import "./checkImportedHealthProducts.js";
 import { buildComparisonOptions, buildComparisonPeriods, buildKeywordRankChanges, comparisonMethodText } from "../public/comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "../public/categoryMappingReview.js";
+import { aggregateExecutivePeriod } from "../src/executiveReport.js";
 
 const months = (start, count) => {
   const [year, month] = start.split("-").map(Number);
@@ -44,6 +45,20 @@ assert.equal(ranked.rows[1].averageMonthlyRank, 334.667);
 assert.equal(buildComparisonPeriods([report("2025-02"), report("2025-01")], "month").periods[0].month, "2025-01");
 assert.match(comparisonMethodText("year"), /1~12월/);
 assert.match(comparisonMethodText("rollingYear"), /연속 12개월/);
+
+const tied = [
+  report("2026-01", [{ keyword: "A", rank: 1 }, { keyword: "B", rank: 4 }]),
+  report("2026-02", [{ keyword: "A", rank: 4 }, { keyword: "B", rank: 3 }]),
+  report("2026-03", [{ keyword: "A", rank: 4 }, { keyword: "B", rank: 2 }])
+];
+assert.deepEqual(
+  aggregateExecutivePeriod(tied).rows.map((row) => row.keyword),
+  buildComparisonPeriods(tied, "quarter").periods[0].rows.map((row) => row.keyword)
+);
+const fiveCategories = ["첫째", "둘째", "셋째", "넷째", "다섯째"];
+assert.deepEqual(aggregateExecutivePeriod([
+  report("2026-01", [{ keyword: "복합제품", rank: 1, categories: fiveCategories }])
+]).rows[0].categories, fiveCategories);
 
 const keyword = (rank) => ({ keyword: "베르베린", rank });
 assert.deepEqual(buildKeywordRankChanges([

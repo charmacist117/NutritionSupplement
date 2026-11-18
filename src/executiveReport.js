@@ -1,21 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
+import { normalizeAssignedCategories } from "../public/categoryAssignments.js";
+import { aggregateRankingRows } from "../public/comparisonPeriods.js";
 
 const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_REGION);
 const KOREAN_FONT_DATA = IS_SERVERLESS
   ? ""
   : readFileSync(new URL("../fonts/NotoSansKR-Variable.ttf", import.meta.url)).toString("base64");
 
-const MISSING_RANK = 501;
-
 export async function createExecutiveReportPdf(input = {}) {
-  const baseline = aggregatePeriod(input.baselineReports, "기준 구간");
-  const current = aggregatePeriod(input.currentReports, "비교 구간");
+  const baseline = aggregateExecutivePeriod(input.baselineReports, "기준 구간");
+  const current = aggregateExecutivePeriod(input.currentReports, "비교 구간");
   if (!baseline.rows.length || !current.rows.length) throw new Error("두 비교 구간의 리포트 자료가 필요합니다.");
 
   const analysis = analyzePeriods(baseline, current);
   const browser = await launchPdfBrowser();
   try {
-    const page = await browser.newPage();
+    const page = await newPdfPage(browser);
     await page.setContent(renderReportHtml(analysis), { waitUntil: "networkidle0" });
     await page.evaluate(async () => {
       await document.fonts.ready;
@@ -42,7 +42,7 @@ export async function createComparisonReportPdf(input = {}) {
 
   const browser = await launchPdfBrowser();
   try {
-    const page = await browser.newPage();
+    const page = await newPdfPage(browser);
     await page.setContent(renderComparisonHtml(html), { waitUntil: "networkidle0" });
     await page.evaluate(async () => document.fonts.ready);
     return await page.pdf({
@@ -74,24 +74,12 @@ function renderComparisonHtml(content) {
   </style></head><body>${content}</body></html>`;
 }
 
-function aggregatePeriod(reports = [], fallbackLabel) {
+export function aggregateExecutivePeriod(reports = [], fallbackLabel) {
   const sorted = reports.filter(Boolean).slice(0, 24).sort((a, b) => String(a.endDate).localeCompare(String(b.endDate)));
   if (!sorted.length) return { label: fallbackLabel, startDate: "", endDate: "", rows: [] };
-  const maps = sorted.map((report) => new Map((report.rows || []).slice(0, 500).map((row) => [normalize(row.keyword), normalizeReportRow(row)]).filter(([key]) => key)));
-  const keys = new Set(maps.flatMap((rows) => [...rows.keys()]));
-  const rows = [...keys].map((key) => {
-    const points = maps.map((rows) => rows.get(key) || null);
-    const latest = [...points].reverse().find(Boolean);
-    const averageRank = points.reduce((sum, row) => sum + (row ? Number(row.rank) : MISSING_RANK), 0) / points.length;
-    return {
-      keyword: latest?.keyword || key,
-      categories: unique((latest?.categories || ["기타"]).filter(Boolean)),
-      averageRank,
-      presentCount: points.filter(Boolean).length
-    };
-  }).sort((a, b) => a.averageRank - b.averageRank || b.presentCount - a.presentCount || a.keyword.localeCompare(b.keyword, "ko"))
-    .slice(0, 500)
-    .map((row, index) => ({ ...row, rank: index + 1 }));
+  const rows = aggregateRankingRows(sorted.map((report) => ({
+    rows: (report.rows || []).slice(0, 500).map(normalizeReportRow)
+  })));
 
   return {
     label: sorted.length === 1 ? periodLabel(sorted[0]) : `${periodLabel(sorted[0])} ~ ${periodLabel(sorted.at(-1))}`,
@@ -106,9 +94,9 @@ function normalizeReportRow(row = {}) {
   return {
     rank: Math.max(1, Math.min(500, Number(row.rank) || 500)),
     keyword: String(row.keyword || "").trim().slice(0, 100),
-    categories: unique((Array.isArray(row.categories) ? row.categories : ["기타"])
+    categories: normalizeAssignedCategories((Array.isArray(row.categories) ? row.categories : ["기타"])
       .map((value) => String(value || "").trim().slice(0, 50))
-      .filter(Boolean)).slice(0, 2)
+      .filter(Boolean))
   };
 }
 
@@ -217,6 +205,17 @@ function normalize(value) { return String(value || "").trim().toLowerCase().repl
 function unique(values) { return [...new Set(values)]; }
 function periodLabel(report) { return `${report.startDate || ""} ~ ${report.endDate || ""}`; }
 function e(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+
+async function newPdfPage(browser) {
+  const page = await browser.newPage();
+  await page.setJavaScriptEnabled(false);
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    if (request.url().startsWith("data:")) return request.continue();
+    return request.abort();
+  });
+  return page;
+}
 
 async function launchPdfBrowser() {
   const puppeteer = await import("puppeteer-core");
