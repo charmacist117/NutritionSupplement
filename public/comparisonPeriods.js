@@ -11,7 +11,7 @@ function lastDayOfMonth(monthKey) {
   return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
-function completeMonthKey(key) {
+export function completeMonthKey(key) {
   const value = String(key || "");
   const month = value.match(/^(\d{4})-(\d{2})(?:$|-01_(\d{4}-\d{2}-\d{2})$)/);
   if (!month || Number(month[2]) < 1 || Number(month[2]) > 12) return null;

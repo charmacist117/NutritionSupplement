@@ -1243,6 +1243,34 @@ button:disabled {
   margin-top: 18px;
 }
 
+#category-status-period-list[hidden] {
+  display: none;
+}
+
+.category-status-custom-form:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.category-status-custom-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.category-status-custom-form input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink);
+  font: inherit;
+}
+
 .category-manager {
   display: grid;
   gap: 14px;
@@ -1439,6 +1467,35 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fbfcfd;
+}
+
+.rank-chart-frame {
+  min-width: 0;
+  position: relative;
+}
+
+.rank-chart-tooltip {
+  position: absolute;
+  z-index: 1;
+  max-width: min(280px, 100%);
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+#category-rank-chart [data-rank-detail] {
+  cursor: help;
+}
+
+#category-rank-chart [data-rank-detail]:focus {
+  outline: none;
+  stroke: var(--ink);
+  stroke-width: 2;
 }
 
 #category-rank-chart {

@@ -1,4 +1,4 @@
-import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, buildKeywordRankChanges, comparisonMethodText } from "./comparisonPeriods.js";
+import { COMPARISON_MODES, buildComparisonOptions, buildComparisonPeriods, buildKeywordRankChanges, comparisonMethodText, completeMonthKey } from "./comparisonPeriods.js";
 import { baseAutoProductCategoryFor, baseAutoProductCategoriesFor, mappingReview, compareMappingPriority, isMappingReviewTarget } from "./categoryMappingReview.js";
 import { MAX_CATEGORY_ASSIGNMENTS, normalizeAssignedCategories, categoryMappingRecord } from "./categoryAssignments.js";
 
@@ -41,6 +41,14 @@ const categoryOrderList = document.querySelector("#category-order-list");
 const categoryOrderStatus = document.querySelector("#category-order-status");
 const categoryOrderButtons = [...document.querySelectorAll("[data-category-move]")];
 const categoryStatusRefreshButton = document.querySelector("#category-status-refresh");
+const categoryStatusDownloadButton = document.querySelector("#category-status-download");
+const categoryStatusModeButtons = [...document.querySelectorAll("[data-category-status-mode]")];
+const categoryStatusPeriodHelp = document.querySelector("#category-status-period-help");
+const categoryStatusPeriodList = document.querySelector("#category-status-period-list");
+const categoryStatusPeriodMessage = document.querySelector("#category-status-period-message");
+const categoryStatusCustomForm = document.querySelector("#category-status-custom-form");
+const categoryStatusStart = document.querySelector("#category-status-start");
+const categoryStatusEnd = document.querySelector("#category-status-end");
 const categoryStatusSummary = document.querySelector("#category-status-summary");
 const statusSeriesType = document.querySelector("#status-series-type");
 const statusSeriesSearch = document.querySelector("#status-series-search");
@@ -48,6 +56,7 @@ const statusSeriesOptions = document.querySelector("#status-series-options");
 const statusSeriesAddButton = document.querySelector("#status-series-add");
 const statusSeriesList = document.querySelector("#status-series-list");
 const categoryRankChart = document.querySelector("#category-rank-chart");
+const categoryRankTooltip = document.querySelector("#category-rank-tooltip");
 const categoryRankLegend = document.querySelector("#category-rank-legend");
 const categoryListCount = document.querySelector("#category-list-count");
 const categoryStatusList = document.querySelector("#category-status-list");
@@ -180,6 +189,11 @@ let mappingRows = [];
 let newKeywordRows = [];
 let categoryStatusReports = [];
 let categoryStatusRows = [];
+let categoryStatusMode = "month";
+let categoryStatusRenderVersion = 0;
+let categoryStatusCustomKey = "";
+const categoryStatusSelections = new Map();
+let categoryRankTooltipMark = null;
 let selectedStatusCategory = "";
 let selectedTrendSeries = readTrendSeriesSelection();
 let draggedReportKey = null;
@@ -272,6 +286,47 @@ for (const button of categoryOrderButtons) {
 
 categoryStatusRefreshButton.addEventListener("click", async () => {
   await renderCategoryStatusSheet({ refreshReports: true });
+});
+categoryStatusDownloadButton.addEventListener("click", downloadCategoryStatusXlsx);
+for (const button of categoryStatusModeButtons) {
+  button.addEventListener("click", () => {
+    categoryStatusMode = button.dataset.categoryStatusMode;
+    renderCategoryStatusSheet();
+  });
+}
+categoryStatusPeriodList.addEventListener("change", (event) => {
+  const input = event.target.closest("input[data-report-key]");
+  if (!input) return;
+  const selected = categoryStatusSelections.get(categoryStatusMode);
+  const key = input.dataset.reportKey;
+  if (input.checked) selected.add(key);
+  else selected.delete(key);
+  renderCategoryStatusSheet({ keepPeriodList: true });
+});
+categoryStatusCustomForm.addEventListener("input", () => {
+  categoryStatusEnd.setCustomValidity("");
+  categoryStatusEnd.min = categoryStatusStart.value;
+});
+categoryStatusCustomForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (categoryStatusStart.value > categoryStatusEnd.value) {
+    categoryStatusEnd.setCustomValidity("종료일은 시작일 이후로 선택해주세요.");
+    categoryStatusEnd.reportValidity();
+    return;
+  }
+  categoryStatusCustomKey = `${categoryStatusStart.value}_${categoryStatusEnd.value}`;
+  renderCategoryStatusSheet();
+});
+categoryRankChart.addEventListener("pointerover", showCategoryRankTooltip);
+categoryRankChart.addEventListener("focusin", showCategoryRankTooltip);
+categoryRankChart.addEventListener("click", showCategoryRankTooltip);
+categoryRankChart.addEventListener("pointerout", hideCategoryRankTooltip);
+categoryRankChart.addEventListener("focusout", hideCategoryRankTooltip);
+categoryRankChart.parentElement.addEventListener("scroll", () => {
+  if (categoryRankTooltipMark) positionCategoryRankTooltip(categoryRankTooltipMark);
+});
+categoryRankChart.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideCategoryRankTooltip();
 });
 statusSeriesType.addEventListener("change", () => updateStatusSeriesOptions());
 statusSeriesSearch.addEventListener("keydown", (event) => {
@@ -1795,22 +1850,45 @@ function applyNewKeywordSuggestions() {
 }
 
 async function renderCategoryStatusSheet(options = {}) {
+  const version = ++categoryStatusRenderVersion;
+  const mode = categoryStatusMode;
+  const custom = mode === "custom";
+  const available = categoryStatusPeriodOptions(mode);
+  const selected = categoryStatusSelections.get(mode) || new Set(
+    (mode === "month" ? available : available.slice(0, 1)).map((period) => period.key)
+  );
+  if (available.length) categoryStatusSelections.set(mode, selected);
+
+  if (!options.keepPeriodList) renderCategoryStatusPeriods(available, selected);
+  const periods = custom ? available : available.filter((period) => selected.has(period.key));
+  const keys = [...new Set(periods.flatMap((period) => period.reportKeys))];
+  if (options.refreshReports) reportCache = new Map();
+  if (!keys.length) {
+    const message = !reportKeys.length ? "저장된 자료가 없습니다."
+      : custom ? (categoryStatusCustomKey
+        ? "입력한 날짜와 일치하는 리포트가 없습니다. 상단에서 같은 기간을 먼저 수집해주세요."
+        : "시작일과 종료일을 입력하고 기간을 적용해주세요.")
+      : available.length ? "조회할 기간을 선택해주세요."
+      : mode === "month" ? "달력 월 전체를 수집한 자료가 없습니다."
+      : `${COMPARISON_MODES[mode].label}로 조회할 연속된 완전한 월 자료가 없습니다.`;
+    clearCategoryStatusView(message);
+    return;
+  }
+
+  clearCategoryStatusView("선택한 기간의 자료를 불러오는 중입니다.");
   categoryStatusRefreshButton.disabled = true;
   try {
-    if (options.refreshReports) reportCache = new Map();
-    categoryStatusReports = await loadAllReports();
-
-    if (!categoryStatusReports.length) {
-      categoryStatusRows = [];
-      categoryStatusSummary.replaceChildren();
-      categoryStatusList.innerHTML = `<p class="empty">저장된 자료가 없습니다.</p>`;
-      categoryPeriodBody.innerHTML = `<tr><td colspan="4">저장된 자료가 없습니다.</td></tr>`;
-      categoryKeywordBody.innerHTML = `<tr><td colspan="4">저장된 자료가 없습니다.</td></tr>`;
-      categoryRankChart.innerHTML = `<text x="24" y="40" class="chart-empty">저장된 자료가 없습니다.</text>`;
-      categoryRankLegend.replaceChildren();
-      return;
+    const reports = await Promise.all(keys.map(fetchReport));
+    if (version !== categoryStatusRenderVersion) return;
+    if (reports.some((report) => !report)) {
+      throw new Error("선택한 기간의 자료를 불러오지 못했습니다. 새로고침으로 다시 시도해주세요.");
     }
 
+    const grouped = buildComparisonPeriods(reports, custom ? "month" : mode, periods.map((period) => period.key));
+    if (grouped.periods.length !== periods.length) {
+      throw new Error("선택한 기간의 월 자료가 불완전합니다. 기간을 다시 선택해주세요.");
+    }
+    categoryStatusReports = grouped.periods;
     categoryStatusRows = buildCategoryStatusRows(categoryStatusReports);
     if (!categoryStatusRows.some((row) => row.category === selectedStatusCategory)) {
       selectedStatusCategory = categoryStatusRows.find((row) => row.keywords.length)?.category
@@ -1825,9 +1903,59 @@ async function renderCategoryStatusSheet(options = {}) {
     ensureDefaultTrendSeries();
     renderSelectedTrendSeries();
     renderCategoryRankChart();
+    categoryStatusPeriodMessage.textContent = custom
+      ? periodLabel(categoryStatusReports[0])
+      : `${categoryStatusReports.length}개 기간 조회 · ${grouped.note}`;
+    categoryStatusDownloadButton.disabled = false;
+  } catch (error) {
+    if (version === categoryStatusRenderVersion) clearCategoryStatusView(error.message);
   } finally {
-    categoryStatusRefreshButton.disabled = false;
+    if (version === categoryStatusRenderVersion) categoryStatusRefreshButton.disabled = false;
   }
+}
+
+function categoryStatusPeriodOptions(mode) {
+  if (mode === "custom") {
+    const key = [...reportKeys].sort().find((item) => reportSortValue(item) === categoryStatusCustomKey);
+    return key ? [{ key, reportKeys: [key] }] : [];
+  }
+  if (mode !== "month") return buildComparisonOptions(reportKeys, mode).reverse();
+
+  const byMonth = new Map();
+  for (const key of [...reportKeys].sort()) {
+    const month = completeMonthKey(key);
+    if (month && !byMonth.has(month)) byMonth.set(month, key);
+  }
+  return buildComparisonOptions([...byMonth.values()].reverse(), mode);
+}
+
+function renderCategoryStatusPeriods(periods, selected) {
+  const mode = categoryStatusMode;
+  const custom = mode === "custom";
+  for (const button of categoryStatusModeButtons) {
+    const active = button.dataset.categoryStatusMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  categoryStatusCustomForm.hidden = !custom;
+  categoryStatusPeriodList.hidden = custom;
+  categoryStatusPeriodHelp.textContent = custom ? "입력한 시작일과 종료일이 일치하는 저장 리포트를 조회합니다."
+    : mode === "month" ? "조회할 월을 선택하세요."
+    : comparisonMethodText(mode);
+  categoryStatusPeriodList.replaceChildren(...periods.map((period) => comparisonPeriodOption(period, selected)));
+}
+
+function clearCategoryStatusView(message) {
+  categoryStatusReports = [];
+  categoryStatusRows = [];
+  categoryStatusRefreshButton.disabled = false;
+  categoryStatusDownloadButton.disabled = true;
+  categoryStatusPeriodMessage.textContent = message;
+  categoryStatusSummary.replaceChildren();
+  renderCategoryStatusList();
+  renderCategoryDetail();
+  updateStatusSeriesOptions();
+  renderCategoryRankChart();
 }
 
 function buildCategoryStatusRows(reports) {
@@ -1909,7 +2037,7 @@ function renderCategoryStatusSummary() {
 
   categoryStatusSummary.innerHTML = [
     comparisonMetricHtml("카테고리", `${productCategories.length}개`, "현재 저장할 수 있는 제품군"),
-    comparisonMetricHtml("고유 키워드", `${keywords.length}개`, "저장 자료 전체 기준"),
+    comparisonMetricHtml("고유 키워드", `${keywords.length}개`, "선택한 기간 기준"),
     comparisonMetricHtml("직접 지정 / 자동", `${manualCount} / ${automaticCount}`, "직접 매칭과 자동 규칙 적용"),
     comparisonMetricHtml("미지정", `${unmappedCount}개`, "카테고리 규칙에 포함되지 않은 키워드")
   ].join("");
@@ -1964,8 +2092,7 @@ function renderCategoryDetail() {
 function renderCategoryKeywordRows() {
   const row = categoryStatusRows.find((item) => item.category === selectedStatusCategory);
   if (!row) return;
-  const search = normalizeText(categoryKeywordSearch.value);
-  const keywords = row.keywords.filter((item) => !search || normalizeText(item.keyword).includes(search));
+  const keywords = filteredCategoryStatusKeywords(row);
 
   if (!keywords.length) {
     categoryKeywordBody.innerHTML = `<tr><td colspan="4">조건에 맞는 하부 키워드가 없습니다.</td></tr>`;
@@ -1976,15 +2103,28 @@ function renderCategoryKeywordRows() {
     <tr>
       <td><strong>${escapeHtml(item.keyword)}</strong></td>
       <td>${assignmentBadgeHtml(item.assignmentType)}</td>
-      <td>${escapeHtml(periodLabel(item.latestPeriod))}</td>
+      <td>${escapeHtml(categoryStatusLatestPeriodLabel(item))}</td>
       <td>${item.latestRank ? `${item.latestRank}위` : "-"}</td>
     </tr>
   `).join("");
 }
 
+function filteredCategoryStatusKeywords(row) {
+  const search = normalizeText(categoryKeywordSearch.value);
+  return row.keywords.filter((item) => !search || item.key.includes(search));
+}
+
+function categoryStatusLatestPeriodLabel(keyword) {
+  const latest = categoryStatusReports.find((report) => report.month === keyword.latestPeriod);
+  return periodLabel(latest || keyword.latestPeriod);
+}
+
+function assignmentLabel(type) {
+  return { manual: "직접 지정", automatic: "자동 규칙", unmapped: "미지정" }[type] || "미지정";
+}
+
 function assignmentBadgeHtml(type) {
-  const labels = { manual: "직접 지정", automatic: "자동 규칙", unmapped: "미지정" };
-  return `<span class="assignment-badge ${type}">${labels[type] || "미지정"}</span>`;
+  return `<span class="assignment-badge ${type}">${assignmentLabel(type)}</span>`;
 }
 
 function updateStatusSeriesOptions() {
@@ -1998,14 +2138,6 @@ function updateStatusSeriesOptions() {
 }
 
 function ensureDefaultTrendSeries() {
-  const validCategories = new Set(categoryStatusRows.map((row) => row.category));
-  const validKeywords = new Set(allCategoryStatusKeywords().map((row) => normalizeText(row.keyword)));
-  selectedTrendSeries = selectedTrendSeries.filter((series) => (
-    series.type === "category"
-      ? validCategories.has(series.value)
-      : series.type === "keyword" && validKeywords.has(normalizeText(series.value))
-  ));
-
   if (!selectedTrendSeries.length) {
     selectedTrendSeries = categoryStatusRows
       .filter((row) => row.keywords.length)
@@ -2089,11 +2221,17 @@ function trendSeriesPoints(series) {
 }
 
 function renderCategoryRankChart() {
+  hideCategoryRankTooltip();
   const reports = categoryStatusReports;
   const series = selectedTrendSeries.map((item) => ({ ...item, points: trendSeriesPoints(item) }));
-  if (!reports.length || !series.length) {
-    categoryRankChart.setAttribute("viewBox", "0 0 920 280");
-    categoryRankChart.innerHTML = `<text x="28" y="44" class="chart-empty">표시할 카테고리나 키워드를 추가해주세요.</text>`;
+  const observed = series.flatMap((item) => item.points).filter(Number.isFinite);
+  if (!reports.length || !observed.length) {
+    categoryRankChart.setAttribute("viewBox", "0 0 480 96");
+    categoryRankChart.style.removeProperty("min-width");
+    const message = !reports.length ? "조회 기간의 자료가 없습니다."
+      : series.length ? "선택한 기간에 표시할 순위가 없습니다."
+      : "표시할 카테고리나 키워드를 추가해주세요.";
+    categoryRankChart.innerHTML = `<text x="24" y="48" class="chart-empty">${message}</text>`;
     categoryRankLegend.replaceChildren();
     return;
   }
@@ -2104,12 +2242,16 @@ function renderCategoryRankChart() {
   const padding = { top: 22, right: 24, bottom: 68, left: 58 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const observed = series.flatMap((item) => item.points).filter(Number.isFinite);
   const maxObserved = Math.max(50, ...observed);
   const maxRank = Math.min(500, Math.ceil(maxObserved / 50) * 50);
-  const x = (index) => padding.left + (reports.length <= 1 ? chartWidth / 2 : chartWidth * index / (reports.length - 1));
+  const slotWidth = chartWidth / reports.length;
+  const x = (index) => padding.left + slotWidth * (index + 0.5);
   const y = (rank) => padding.top + chartHeight * (Number(rank) - 1) / Math.max(1, maxRank - 1);
   const ticks = [...new Set([1, Math.ceil(maxRank * 0.25), Math.ceil(maxRank * 0.5), Math.ceil(maxRank * 0.75), maxRank])];
+  const keywords = series.filter((item) => item.type === "keyword");
+  const barWidth = Math.min(28, slotWidth * 0.7 / Math.max(1, keywords.length));
+  const seriesColor = (item) => colors[series.indexOf(item) % colors.length];
+  const rankLabel = (item, index, rank) => `${item.value}${item.type === "category" ? " (카테고리 최고)" : ""}\n${periodLabel(reports[index])}\n${rank}위`;
 
   categoryRankChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
   categoryRankChart.style.minWidth = `${width}px`;
@@ -2124,7 +2266,14 @@ function renderCategoryRankChart() {
       const [line1, line2] = periodAxisLabelParts(periodLabel(report));
       return `<text x="${x(index)}" y="${height - 34}" text-anchor="middle" class="axis-label"><tspan x="${x(index)}">${escapeHtml(line1)}</tspan>${line2 ? `<tspan x="${x(index)}" dy="13">${escapeHtml(line2)}</tspan>` : ""}</text>`;
     }).join("")}
-    ${series.map((item, seriesIndex) => renderRankSeriesSvg(item, seriesIndex, colors[seriesIndex % colors.length], x, y)).join("")}
+    ${keywords.map((item, keywordIndex) => item.points.map((rank, periodIndex) => {
+      if (!Number.isFinite(rank)) return "";
+      const barX = x(periodIndex) + (keywordIndex - keywords.length / 2) * barWidth;
+      const barHeight = Math.max(2, y(maxRank) - y(rank));
+      return `<rect x="${barX + barWidth * 0.08}" y="${y(maxRank) - barHeight}" width="${barWidth * 0.84}" height="${barHeight}" rx="2" fill="${seriesColor(item)}" ${categoryRankMarkAttributes(rankLabel(item, periodIndex, rank))}></rect>`;
+    }).join("")).join("")}
+    ${series.filter((item) => item.type === "category").map((item) =>
+      renderRankSeriesSvg(item, seriesColor(item), x, y, rankLabel)).join("")}
   `;
 
   categoryRankLegend.innerHTML = series.map((item, index) => `
@@ -2135,7 +2284,7 @@ function renderCategoryRankChart() {
   `).join("");
 }
 
-function renderRankSeriesSvg(series, seriesIndex, color, x, y) {
+function renderRankSeriesSvg(series, color, x, y, rankLabel) {
   const segments = [];
   let current = [];
   series.points.forEach((rank, index) => {
@@ -2149,14 +2298,93 @@ function renderRankSeriesSvg(series, seriesIndex, color, x, y) {
 
   const paths = segments.map((segment) => {
     const path = segment.map((point, index) => `${index ? "L" : "M"} ${x(point.index)} ${y(point.rank)}`).join(" ");
-    return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"></path>`;
+    return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" pointer-events="none"></path>`;
   }).join("");
   const points = series.points.map((rank, index) => Number.isFinite(rank) ? `
-    <circle cx="${x(index)}" cy="${y(rank)}" r="4" fill="${color}">
-      <title>${escapeHtml(series.value)} · ${rank}위</title>
-    </circle>
+    <circle cx="${x(index)}" cy="${y(rank)}" r="4" fill="${color}" ${categoryRankMarkAttributes(rankLabel(series, index, rank))}></circle>
   ` : "").join("");
-  return `<g data-series-index="${seriesIndex}">${paths}${points}</g>`;
+  return `<g>${paths}${points}</g>`;
+}
+
+function categoryRankMarkAttributes(detail) {
+  return `tabindex="0" role="img" aria-label="${escapeHtml(detail.replaceAll("\n", ", "))}" data-rank-detail="${escapeHtml(detail)}"`;
+}
+
+function showCategoryRankTooltip(event) {
+  const mark = event.target.closest("[data-rank-detail]");
+  if (!mark) return;
+  categoryRankTooltipMark = mark;
+  categoryRankTooltip.textContent = mark.dataset.rankDetail;
+  positionCategoryRankTooltip(mark);
+}
+
+function positionCategoryRankTooltip(mark) {
+  const frame = categoryRankTooltip.parentElement.getBoundingClientRect();
+  const box = mark.getBoundingClientRect();
+  if (box.right < frame.left || box.left > frame.right) {
+    hideCategoryRankTooltip();
+    return;
+  }
+  categoryRankTooltip.hidden = false;
+  const width = categoryRankTooltip.offsetWidth;
+  const height = categoryRankTooltip.offsetHeight;
+  const center = (box.left + box.right) / 2 - frame.left;
+  const x = Math.max(0, Math.min(center - width / 2, frame.width - width));
+  const above = box.top - frame.top - height - 8;
+  const y = above >= 0 ? above : box.top - frame.top + Math.min(box.height, 9);
+  categoryRankTooltip.style.left = `${x}px`;
+  categoryRankTooltip.style.top = `${y}px`;
+}
+
+function hideCategoryRankTooltip() {
+  categoryRankTooltipMark = null;
+  categoryRankTooltip.hidden = true;
+}
+
+function downloadCategoryStatusXlsx() {
+  if (!categoryStatusReports.length) return;
+  const periods = categoryStatusReports;
+  const periodLabels = periods.map((report) => `${report.startDate} ~ ${report.endDate}`);
+  const category = categoryStatusRows.find((row) => row.category === selectedStatusCategory);
+  const modeLabel = COMPARISON_MODES[categoryStatusMode]?.label || "직접 선택";
+  const method = categoryStatusMode === "custom" ? "선택한 날짜와 일치하는 저장 리포트의 검색 순위를 사용합니다."
+    : comparisonMethodText(categoryStatusMode);
+  const rows = [
+    ["카테고리 현황", modeLabel],
+    ["순위 기준", method],
+    [],
+    ["그래프 선택 항목"],
+    ["종류", "항목", ...periodLabels],
+    ...selectedTrendSeries.map((series) => {
+      const ranks = trendSeriesPoints(series);
+      return [series.type === "category" ? "카테고리 최고 순위" : "키워드 순위", series.value,
+        ...periods.map((_, index) => ranks[index] ?? "")];
+    }),
+    [],
+    ["카테고리 현황", category.category],
+    ["조회 기간", "최고 순위", "Top 100 개수", "Top 500 개수"],
+    ...category.points.map((point, index) => [periodLabels[index], point.bestRank ?? "", point.top100Count, point.top500Count]),
+    [],
+    ["하부 키워드", categoryKeywordSearch.value.trim()],
+    ["키워드", "적용 방식", "최근 진입 기간", "최근 순위", ...periodLabels],
+    ...filteredCategoryStatusKeywords(category).map((keyword) => [
+      keyword.keyword,
+      assignmentLabel(keyword.assignmentType),
+      categoryStatusLatestPeriodLabel(keyword),
+      keyword.latestRank ?? "",
+      ...keyword.periodRanks.map((rank) => rank ?? "")
+    ])
+  ];
+  const widths = [29, 32, 45, 29, ...periods.map(() => 29)];
+  const blob = createXlsxBlob("카테고리 현황", rows, widths);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `category-status_${categoryStatusMode}_${safeFileName(periods[0].startDate)}_${safeFileName(periods.at(-1).endDate)}.xlsx`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function readTrendSeriesSelection() {
@@ -2313,21 +2541,23 @@ function renderComparisonPeriodList() {
   }
   const fragment = document.createDocumentFragment();
   for (const option of comparisonMode === "month" ? periods : periods.toReversed()) {
-    const key = option.key;
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    const text = document.createElement("span");
-
-    label.className = "comparison-period-option";
-    input.type = "checkbox";
-    input.dataset.reportKey = key;
-    input.checked = comparisonSelectedKeys.has(key);
-    text.textContent = option.label || periodLabel(key);
-    label.append(input, text);
-    fragment.append(label);
+    fragment.append(comparisonPeriodOption(option, comparisonSelectedKeys));
   }
 
   comparisonPeriodList.append(fragment);
+}
+
+function comparisonPeriodOption(option, selected) {
+  const label = document.createElement("label");
+  const input = document.createElement("input");
+  const text = document.createElement("span");
+  label.className = "comparison-period-option";
+  input.type = "checkbox";
+  input.dataset.reportKey = option.key;
+  input.checked = selected.has(option.key);
+  text.textContent = option.label || periodLabel(option.key);
+  label.append(input, text);
+  return label;
 }
 
 function initializeExecutivePeriodSelection() {
@@ -3238,7 +3468,7 @@ function roundScore(value) {
   return Number(Number(value || 0).toFixed(3));
 }
 
-function createXlsxBlob(sheetName, rows) {
+function createXlsxBlob(sheetName, rows, columnWidths) {
   const safeSheetName = sanitizeSheetName(sheetName);
   const createdAt = new Date().toISOString();
   const files = [
@@ -3249,7 +3479,7 @@ function createXlsxBlob(sheetName, rows) {
     ["xl/workbook.xml", workbookXml(safeSheetName)],
     ["xl/_rels/workbook.xml.rels", workbookRelsXml()],
     ["xl/styles.xml", stylesXml()],
-    ["xl/worksheets/sheet1.xml", worksheetXml(rows)]
+    ["xl/worksheets/sheet1.xml", worksheetXml(rows, columnWidths)]
   ];
 
   return new Blob([zipFiles(files)], {
@@ -3329,23 +3559,25 @@ function stylesXml() {
 </styleSheet>`;
 }
 
-function worksheetXml(rows) {
+function worksheetXml(rows, columnWidths) {
   const sheetData = rows.map((row, rowIndex) => {
     const rowNumber = rowIndex + 1;
     const cells = row.map((value, columnIndex) => cellXml(value, rowNumber, columnIndex + 1)).join("");
     return `<row r="${rowNumber}">${cells}</row>`;
   }).join("");
 
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-  <cols>
-    <col min="1" max="1" width="8" customWidth="1"/>
+  const columns = columnWidths
+    ? columnWidths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")
+    : `<col min="1" max="1" width="8" customWidth="1"/>
     <col min="2" max="2" width="24" customWidth="1"/>
     <col min="3" max="3" width="14" customWidth="1"/>
     <col min="4" max="6" width="18" customWidth="1"/>
-    <col min="7" max="8" width="16" customWidth="1"/>
-  </cols>
+    <col min="7" max="8" width="16" customWidth="1"/>`;
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>${columns}</cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`;
 }
