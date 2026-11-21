@@ -218,8 +218,31 @@
             <h2>카테고리 정립 현황</h2>
             <p>저장된 키워드가 어느 제품군에 속하는지, 직접 지정과 자동 규칙을 구분해 확인합니다.</p>
           </div>
-          <button id="category-status-refresh" class="secondary-button" type="button">새로고침</button>
+          <div class="comparison-actions">
+            <button id="category-status-refresh" class="secondary-button" type="button">새로고침</button>
+            <button id="category-status-download" type="button" disabled>현황 엑셀 다운로드</button>
+          </div>
         </div>
+
+        <fieldset class="comparison-periods">
+          <legend>조회 기간</legend>
+          <div class="comparison-mode" role="group" aria-label="카테고리 현황 조회 단위">
+            <button class="comparison-mode-button active" type="button" data-category-status-mode="month" aria-pressed="true">월별</button>
+            <button class="comparison-mode-button" type="button" data-category-status-mode="quarter" aria-pressed="false">3개월별</button>
+            <button class="comparison-mode-button" type="button" data-category-status-mode="half" aria-pressed="false">6개월별</button>
+            <button class="comparison-mode-button" type="button" data-category-status-mode="rollingYear" aria-pressed="false">12개월간</button>
+            <button class="comparison-mode-button" type="button" data-category-status-mode="year" aria-pressed="false">연간</button>
+            <button class="comparison-mode-button" type="button" data-category-status-mode="custom" aria-pressed="false">직접 선택</button>
+          </div>
+          <p id="category-status-period-help" class="product-query-help"></p>
+          <div id="category-status-period-list" class="comparison-period-list"></div>
+          <form id="category-status-custom-form" class="category-status-custom-form" hidden>
+            <label>시작일 <input id="category-status-start" type="date" required></label>
+            <label>종료일 <input id="category-status-end" type="date" required></label>
+            <button type="submit">기간 적용</button>
+          </form>
+        </fieldset>
+        <p id="category-status-period-message" class="comparison-status" role="status"></p>
 
         <div id="category-status-summary" class="category-status-summary"></div>
 
@@ -227,7 +250,7 @@
           <div class="section-heading">
             <div>
               <h2>선택 항목 순위 추이</h2>
-              <p>X축은 저장 자료, Y축은 검색 순위입니다. 카테고리는 해당 제품군 키워드 중 가장 높은 순위로 표시됩니다.</p>
+              <p>X축은 조회 기간, Y축은 검색 순위입니다. 카테고리는 최고 순위를 선으로, 키워드는 개별 순위를 막대로 표시합니다.</p>
             </div>
           </div>
           <div class="series-picker">
@@ -247,8 +270,11 @@
           </div>
           <div id="status-series-list" class="selected-series-list"></div>
           <div class="rank-chart-layout">
-            <div class="rank-chart-wrap">
-              <svg id="category-rank-chart" role="img" aria-label="저장 자료별 카테고리 및 키워드 검색 순위 추이"></svg>
+            <div class="rank-chart-frame">
+              <div class="rank-chart-wrap">
+                <svg id="category-rank-chart" role="group" aria-label="기간별 카테고리 및 키워드 검색 순위 추이"></svg>
+              </div>
+              <div id="category-rank-tooltip" class="rank-chart-tooltip" aria-hidden="true" hidden></div>
             </div>
             <div id="category-rank-legend" class="rank-chart-legend" aria-label="그래프 범례"></div>
           </div>
@@ -272,7 +298,7 @@
             <div class="table-wrap category-period-table-wrap">
               <table>
                 <thead>
-                  <tr><th>저장 자료</th><th>최고 순위</th><th>Top 100</th><th>Top 500</th></tr>
+                  <tr><th>조회 기간</th><th>최고 순위</th><th>Top 100</th><th>Top 500</th></tr>
                 </thead>
                 <tbody id="category-period-body"></tbody>
               </table>
